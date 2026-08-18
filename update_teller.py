@@ -81,11 +81,18 @@ def main():
     html = open("index.html", encoding="utf-8").read()
     html = re.sub(r'(webshop:\s*)\d+', lambda m: m.group(1) + str(web_rev), html, count=1)
 
-    # --- Fysieke winkel (optioneel) ---
-    fy_dom, fy_id, fy_sec = opt("SHOP_FYSIEK_DOMAIN"), opt("SHOP_FYSIEK_CLIENT_ID"), opt("SHOP_FYSIEK_CLIENT_SECRET")
-    if fy_dom and fy_id and fy_sec:
+    # --- Fysieke winkel (optioneel: 2de Shopify-account) ---
+    # Ondersteunt twee methodes:
+    #  1) SHOP_FYSIEK_TOKEN  = een Admin API access token (shpat_...) van een custom app
+    #     die rechtstreeks in die winkel is aangemaakt. -> direct gebruikt, geen oauth.
+    #  2) SHOP_FYSIEK_CLIENT_ID + SHOP_FYSIEK_CLIENT_SECRET -> client_credentials grant.
+    fy_dom = opt("SHOP_FYSIEK_DOMAIN")
+    fy_token = opt("SHOP_FYSIEK_TOKEN")
+    fy_id, fy_sec = opt("SHOP_FYSIEK_CLIENT_ID"), opt("SHOP_FYSIEK_CLIENT_SECRET")
+    if fy_dom and (fy_token or (fy_id and fy_sec)):
         try:
-            fys_rev, fys_ord = fetch_year(fy_dom, get_token(fy_dom, fy_id, fy_sec))
+            token = fy_token if fy_token else get_token(fy_dom, fy_id, fy_sec)
+            fys_rev, fys_ord = fetch_year(fy_dom, token)
             html = re.sub(r'(fysiek:\s*)\d+', lambda m: m.group(1) + str(fys_rev), html, count=1)
             orders_total += fys_ord
             print(f"fysiek: EUR {fys_rev} / {fys_ord} orders")
