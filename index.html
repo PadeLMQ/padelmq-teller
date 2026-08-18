@@ -11,7 +11,7 @@
 <style>
   /* =========================================================
      PadeLMQ × Tienda Padel Point — Road to €1M (full, lively)
-     Update only the CONFIG in the <script>, or click the amount.
+     Update only the CONFIG in the <script>.
      ========================================================= */
   :root{
     --gold:#d4af37; --gold-lite:#f5d67b; --gold-deep:#b8860b;
@@ -66,8 +66,7 @@
   .amount-row{display:flex; align-items:flex-end; gap:14px; flex-wrap:wrap; margin:22px 0 6px}
   .amount{font-family:'Montserrat'; font-weight:900; font-size:clamp(40px,9.5vw,78px); line-height:1;
     background:linear-gradient(180deg,#fff,var(--gold-lite) 55%,var(--gold-deep)); -webkit-background-clip:text; background-clip:text; color:transparent;
-    cursor:pointer; position:relative; text-shadow:0 2px 40px rgba(212,175,55,.18); font-variant-numeric:tabular-nums}
-  .amount:hover::after{content:"✎ click to edit"; position:absolute; left:0; top:-18px; font-family:'Poppins'; font-size:10px; letter-spacing:.12em; color:var(--muted); -webkit-text-fill-color:var(--muted)}
+    cursor:default; position:relative; text-shadow:0 2px 40px rgba(212,175,55,.18); font-variant-numeric:tabular-nums}
   .of-goal{font-family:'Poppins'; font-weight:500; color:var(--muted); font-size:16px; padding-bottom:10px}
   .of-goal b{color:var(--txt)}
   .pct{margin-left:auto; font-family:'Montserrat'; font-weight:900; font-size:clamp(24px,5.5vw,38px); color:var(--red); font-variant-numeric:tabular-nums; text-shadow:0 2px 20px rgba(230,32,32,.35)}
@@ -212,7 +211,7 @@
       <div class="sub">2026 goal · every ball counts 🎾 · every smash gets us closer to the title</div>
 
       <div class="amount-row">
-        <div class="amount" id="amount" title="Click to change the amount">€0</div>
+        <div class="amount" id="amount">€0</div>
         <div class="of-goal">of <b>€1,000,000</b></div>
         <div class="pct" id="pct">0%</div>
       </div>
@@ -305,7 +304,7 @@
     LASTYEAR: 579030,       // PadeLMQ total sales 2025 (beat-it line)
     PADELMQ_ORDERS: 3007,   // PadeLMQ orders 2026 (webshop 2944 + fysiek 98)
     TIENDA: { total: 1021511, anchorISO: "2026-08-18T12:00:00", perDay: 730, jan1: 854472, targetRevenue: 50000000 }, // running order counter ~730/day; jan1 = order# ~1 Jan 2026; est. revenue = 2026 orders x PadeLMQ AOV
-    UPDATED: "August 18, 2026, 22:55"
+    UPDATED: "August 18, 2026, 15:35"
   };
 
   const nf = new Intl.NumberFormat("en-US");
@@ -416,13 +415,6 @@
     document.getElementById("m").textContent=p(m);
     document.getElementById("s").textContent=p(s);
   }
-
-  document.getElementById("amount").addEventListener("click",()=>{
-    const raw=prompt("New revenue amount in euros (digits only):", Math.round(revenue));
-    if(raw===null) return;
-    const v=Number(String(raw).replace(/[^\d]/g,""));
-    if(!isNaN(v)&&v>=0){ const before=revenue; revenue=v; render(true); if(before<CONFIG.GOAL&&v>=CONFIG.GOAL) party(); }
-  });
 
   function party(){
     if(typeof confetti!=="function") return;
