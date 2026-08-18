@@ -1,0 +1,43 @@
+# Plaats dit bestand in de repo als:  .github/workflows/update-teller.yml
+name: Update teller
+
+on:
+  schedule:
+    - cron: "5 * * * *"   # elk uur op :05
+  workflow_dispatch:
+
+permissions:
+  contents: write   # nodig om de bijgewerkte index.html terug te committen
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - name: Installeer dependencies
+        run: pip install requests
+
+      - name: Werk de teller bij met de Shopify-omzet van dit jaar
+        env:
+          # Zelfde Client ID / Secret als de dagontvangst-robot — GEEN nieuwe tokens.
+          SHOP_WEBSHOP_DOMAIN: ${{ secrets.SHOP_WEBSHOP_DOMAIN }}
+          SHOP_WEBSHOP_CLIENT_ID: ${{ secrets.SHOP_WEBSHOP_CLIENT_ID }}
+          SHOP_WEBSHOP_CLIENT_SECRET: ${{ secrets.SHOP_WEBSHOP_CLIENT_SECRET }}
+          SHOP_FYSIEK_DOMAIN: ${{ secrets.SHOP_FYSIEK_DOMAIN }}
+          SHOP_FYSIEK_CLIENT_ID: ${{ secrets.SHOP_FYSIEK_CLIENT_ID }}
+          SHOP_FYSIEK_CLIENT_SECRET: ${{ secrets.SHOP_FYSIEK_CLIENT_SECRET }}
+          SHOPIFY_API_VERSION: "2024-10"
+        run: python update_teller.py
+
+      - name: Commit de bijgewerkte teller
+        run: |
+          git config user.name "padelmq-teller-bot"
+          git config user.email "bot@padelmq.be"
+          git add index.html
+          git commit -m "omzet-update $(date -u +%FT%TZ)" || echo "geen wijziging"
+          git push
