@@ -16,7 +16,7 @@ from .adapters import Executor, ExecutionResult, Reviewer, ReviewResult
 from .adapters.claude import assumptions_without_source
 from .adapters.reviewer import validate_verdict
 from .config import Settings
-from .cost import BudgetExceeded, CostGuard, Estimate
+from .cost import BudgetExceeded, CostGuard, Estimate, InconsistentUsage
 from .db import ProjectScope
 from .git import GitAdapter, GitError
 from .guards import NoProgressDetector, detect_invented_values
@@ -183,8 +183,16 @@ class Runner:
             self.cost.record(
                 self.scope, estimate, phase=phase, role=role, task_id=task_id, run_id=run_id
             )
-        except KeyError as exc:
-            self._log("kosten-onbekend", task_id=task_id, detail=str(exc))
+        except (KeyError, InconsistentUsage) as exc:
+            # De aanroep is al gedaan en het geld is al uit. Een probleem met de
+            # boekhouding mag de run dan niet alsnog slopen: luid vastleggen en
+            # doorgaan, zodat het in het rapport opvalt in plaats van in een
+            # traceback.
+            self._log(
+                "kosten-onbekend", task_id=task_id, detail=str(exc),
+                model=estimate.model, tokens_in=estimate.tokens_in,
+                tokens_out=estimate.tokens_out, cached_in=estimate.cached_in,
+            )
 
     def _preflight(self, model: str, task_id: int, run_id: int, tokens_in: int, tokens_out: int) -> None:
         """De rem zit vóór de aanroep, niet erna."""

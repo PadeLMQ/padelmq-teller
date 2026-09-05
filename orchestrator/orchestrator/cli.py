@@ -12,6 +12,7 @@ from pathlib import Path
 from . import __version__
 from .answers import answer_locally, process_answers
 from .config import Settings
+from .models import TaskStatus
 from .cost import CostGuard
 from .db import Database
 from .notify import ConsoleNotifier, Message, MultiNotifier
@@ -328,6 +329,29 @@ def cmd_doctor(args) -> int:
 
 
 
+
+def cmd_task_requeue(args) -> int:
+    """Een vastgelopen taak terug in de wachtrij zetten.
+
+    Alleen zinvol na een crash: next_queued() pakt uitsluitend 'queued', dus een
+    taak die in een tussenfase strandde wordt anders nooit meer opgepakt.
+    """
+    settings = _settings()
+    db = Database(settings.db_path)
+    scope = db.scope(args.project)
+    taak = scope.task(args.id)
+    if taak is None:
+        print(f"taak {args.id} bestaat niet in project {args.project}")
+        return 1
+    vorige = taak["status"]
+    if vorige in (TaskStatus.DONE.value, TaskStatus.PR_OPEN.value):
+        print(f"taak {args.id} staat op {vorige!r}; die zet ik niet terug in de wachtrij")
+        return 1
+    scope.set_task(args.id, status=TaskStatus.QUEUED.value)
+    scope.log("requeue", {"van": vorige, "naar": TaskStatus.QUEUED.value}, task_id=args.id)
+    print(f"taak {args.id}: {vorige} -> queued")
+    return 0
+
 def _build_runner(settings, db, project):
     from .adapters.claude import ClaudeExecutor
     from .adapters.reviewer import OpenAIReviewer
@@ -416,6 +440,17 @@ def cmd_run(args) -> int:
                 outcome = runner.run_task(task["id"])
             except Paused as exc:
                 print(str(exc))
+                return 1
+            except Exception as exc:  # noqa: BLE001 - alles wat de lus kan breken
+                # Zonder dit blijft de taak hangen in de fase waarin ze crashte,
+                # en next_queued() pakt alleen 'queued'. Ze zou dus nooit meer
+                # opgepakt worden. Vastleggen, op 'failed' zetten en de run
+                # afsluiten, zodat 'task requeue' hem terug in de wachtrij zet.
+                scope.log("run-gecrasht", {"fout": f"{type(exc).__name__}: {exc}"},
+                          task_id=task["id"])
+                scope.set_task(task["id"], status=TaskStatus.FAILED.value)
+                print(f"[{slug}] taak {task['id']} gecrasht: {type(exc).__name__}: {exc}")
+                print(f"  terug in de wachtrij zetten: orchestrator task requeue {slug} {task['id']}")
                 return 1
             print(f"[{slug}] -> {outcome.status.value}: {outcome.detail}")
             progressed = True
@@ -649,6 +684,11 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("task_id", type=int)
     report.add_argument("--json", action="store_true")
     report.set_defaults(func=cmd_report)
+
+    requeue = task.add_parser("requeue", help="een vastgelopen taak terug in de wachtrij")
+    requeue.add_argument("project")
+    requeue.add_argument("id", type=int)
+    requeue.set_defaults(func=cmd_task_requeue)
 
     doctor = sub.add_parser("doctor", help="omgeving controleren")
     doctor.set_defaults(func=cmd_doctor)
