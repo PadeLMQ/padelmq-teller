@@ -152,3 +152,30 @@ class Audittrail(TempCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class HervattenNaCrash(TempCase):
+    """Een gestrande poging laat de branch staan; de volgende poging moet erop verder."""
+
+    def test_worktree_op_bestaande_branch(self):
+        from orchestrator.git import GitAdapter, run_git
+
+        repo = self.make_repo("hervat")
+        adapter = GitAdapter(self.tmp / "worktrees")
+
+        eerste = adapter.create_worktree(repo, "orch/9", "main")
+        (eerste.path / "nieuw.txt").write_text("werk uit poging 1", encoding="utf-8")
+        sha = adapter.commit(eerste, "werk uit de eerste poging", "t <t@t>")
+        adapter.remove_worktree(eerste)
+
+        # Poging 2: de branch bestaat nog. Dit wierp eerder GitError.
+        tweede = adapter.create_worktree(repo, "orch/9", "main")
+        self.assertEqual(tweede.branch, "orch/9")
+        self.assertTrue(
+            (tweede.path / "nieuw.txt").exists(),
+            "het werk van de eerste poging is weggegooid",
+        )
+        self.assertEqual(
+            run_git(repo, "rev-parse", "orch/9").strip(), sha,
+            "de branch is opnieuw aangemaakt in plaats van hervat",
+        )

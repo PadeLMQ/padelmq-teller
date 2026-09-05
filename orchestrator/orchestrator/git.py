@@ -61,8 +61,21 @@ class GitAdapter:
         if target.exists():
             run_git(repo, "worktree", "remove", "--force", str(target), check=False)
         run_git(repo, "fetch", "--all", "--quiet", check=False)
-        run_git(repo, "worktree", "add", "-b", branch, str(target), base)
+        # Een eerdere poging kan gestrand zijn en de branch achtergelaten hebben.
+        # Dan hangen we de worktree aan die bestaande branch in plaats van hem
+        # opnieuw aan te maken; -b zou hier alleen maar falen. De branch wordt
+        # nooit automatisch weggegooid: daar kan al vastgelegd werk in zitten en
+        # dat weggooien is niet terug te draaien.
+        if self._branch_exists(repo, branch):
+            run_git(repo, "worktree", "add", str(target), branch)
+        else:
+            run_git(repo, "worktree", "add", "-b", branch, str(target), base)
         return Worktree(path=target, branch=branch, repo=repo)
+
+    @staticmethod
+    def _branch_exists(repo: Path, branch: str) -> bool:
+        out = run_git(repo, "branch", "--list", branch, check=False)
+        return bool(out.strip())
 
     def remove_worktree(self, worktree: Worktree) -> None:
         run_git(worktree.repo, "worktree", "remove", "--force", str(worktree.path), check=False)
