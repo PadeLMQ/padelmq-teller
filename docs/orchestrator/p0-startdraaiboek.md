@@ -389,3 +389,30 @@ sparen. Die regel gaat voor.
 Precies daarom bestaat Deel E nu. Onder de nieuwe regel was dit een technische
 afwijking geweest die zonder vragen door mocht, mits vastgelegd — en dat
 vastleggen is nu een poort in code in plaats van een goede gewoonte.
+
+---
+
+## Deel F — defecten uit de eerste echte B7-run
+
+De eerste poging om `orchestrator run padelmq-pro` te draaien legde zes
+defecten bloot. Vier ervan verhinderden dat de run überhaupt kon eindigen.
+Alle zes zijn hersteld en met tests vastgelegd.
+
+| # | defect | gevolg | herstel |
+|---|---|---|---|
+| D-1 | een gecrashte run liet de taak achter in een tussenfase, en `next_queued()` pakt alleen `queued` | de taak was definitief geblokkeerd | de runlus vangt elke fout, zet de taak op `failed` en meldt `task requeue`; dat commando is nieuw |
+| D-2 | aanbieders tellen invoertokens verschillend: OpenAI telt cache mee in `input_tokens`, de Claude-CLI niet | `586218 cachetokens op 28 invoertokens`, de consistentiebewaking sloeg terecht alarm | het contract van `Usage` staat nu expliciet vast; de Claude-adapter telt input, cache_read en cache_creation op |
+| D-3 | de kostenboekhouding klapte ná de betaalde aanroep en sloopte de run | nul rijen in `calls`, geld uitgegeven en niets geboekt | een boekhoudfout wordt vastgelegd als `kosten-onbekend` en stopt de run niet; stoppen maakt het geld niet onuitgegeven |
+| D-4 | `create_worktree` ruimde de worktree op maar niet de branch, en deed daarna `worktree add -b` | elke taak die eenmaal crashte kon nooit hervat worden | bestaat de branch, dan wordt de worktree eraan gehangen; de branch wordt nooit automatisch weggegooid |
+| D-5 | `OpenAIReviewer` eiste `OPENAI_API_KEY` in de omgeving | crash in een opzet waar een credential-proxy de header injecteert en de sleutel er juist niet hoort | zelfde oplossing als in `doctor`: placeholder, proxy vervangt de header |
+| D-6 | `end_run` kreeg de kosten als parameter en geen enkele aanroeper gaf ze mee | elke run rapporteerde $0 terwijl de losse aanroepen klopten | de run telt zelf op wat er op zijn naam staat |
+
+**Wat hieruit blijkt over de bewaking.** D-2 is het vermelden waard: de
+consistentiebewaking deed exact wat ze moest doen — stoppen in plaats van een
+verkeerd bedrag boeken. De fout zat niet in de bewaking maar in de aanname dat
+twee aanbieders hetzelfde tellen. Zonder die bewaking was er stilletjes een
+onzinbedrag geboekt.
+
+**Nog niet hersteld.** Runs die crashten blijven open staan (`ended_at` leeg);
+alleen de laatste run is netjes afgesloten. Dat is cosmetisch in de
+rapportage en is bewust blijven liggen.
