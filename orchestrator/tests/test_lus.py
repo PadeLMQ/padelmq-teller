@@ -416,3 +416,59 @@ class Hervatten(Lus):
             "Herziening gevraagd", self.executor.calls[0],
             "de eerste ronde had nog geen feedback mogen bevatten",
         )
+
+    def test_openstaande_feedback_gaat_voor_op_hergebruik(self):
+        """Groen bestaand werk mag de revisielus niet kortsluiten.
+
+        Dit gebeurde echt: de hervattingsfase zag groene checks, sloeg de
+        uitvoerder over, en de beoordelaar gaf twee ronden lang exact dezelfde
+        herziening terug zonder dat er iets veranderde.
+        """
+        from orchestrator.adapters import Finding, ReviewResult
+        from orchestrator.models import Verdict
+
+        revise = ReviewResult(
+            verdict=Verdict.REVISE,
+            findings=[Finding(severity="major", file="package.json",
+                              issue="vlag ontbreekt", fix="voeg de vlag toe")],
+            next_instruction="Voeg de vlag toe.",
+        )
+        runner = self.build(
+            steps=[{"write": {"a.py": "x = 1\n"}}, {"write": {"a.py": "x = 2\n"}}],
+            reviews=[revise, ReviewResult(verdict=Verdict.PASS)],
+        )
+        task_id = self.task(runner)
+        self._leg_werk_klaar(runner, task_id)
+
+        eerste = runner.run_task(task_id)
+        self.assertEqual(eerste.status, TaskStatus.QUEUED)
+
+        tweede = runner.run_task(task_id)
+
+        self.assertEqual(
+            len(self.executor.calls), 1,
+            "de uitvoerder is niet aangeroepen om de herziening door te voeren",
+        )
+        self.assertIn("Voeg de vlag toe.", self.executor.calls[-1])
+        self.assertEqual(tweede.status, TaskStatus.PR_OPEN)
+
+    def test_dezelfde_herziening_tweemaal_stopt(self):
+        """Twee identieke herzieningen achter elkaar is geen vooruitgang."""
+        from orchestrator.adapters import ReviewResult
+        from orchestrator.models import Verdict
+
+        revise = ReviewResult(verdict=Verdict.REVISE,
+                              next_instruction="Doe precies hetzelfde.")
+        runner = self.build(
+            steps=[{"write": {"a.py": "x = 1\n"}}, {"write": {"b.py": "y = 2\n"}}],
+            reviews=[revise, revise],
+        )
+        task_id = self.task(runner)
+
+        self.assertEqual(runner.run_task(task_id).status, TaskStatus.QUEUED)
+        tweede = runner.run_task(task_id)
+
+        self.assertEqual(tweede.status, TaskStatus.BLOCKED)
+        events = [r for r in self.scope.events(limit=50)
+                  if r["kind"] == "herhaalde-herziening"]
+        self.assertTrue(events, "de herhaling is niet vastgelegd")

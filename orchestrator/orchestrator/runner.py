@@ -279,6 +279,9 @@ class Runner:
 
         run_id = self.scope.start_run(task_id, "task")
         self._auto_answers = []
+        # Over runs heen bewaard in de database; binnen een run hier, zodat een
+        # herhaalde herziening ook zichtbaar is nadat de feedback verwerkt is.
+        self._verwerkte_feedback = None
 
         # 0 · baseline
         self.scope.set_task(task_id, status=TaskStatus.BASELINE.value)
@@ -358,7 +361,12 @@ class Runner:
                     self.scope.set_task(task_id, claude_session_id=execution.session_id)
                 # De feedback is nu verwerkt; hem laten staan zou hem een ronde
                 # later opnieuw als openstaand punt presenteren.
-                if task["review_feedback"] if "review_feedback" in task.keys() else None:
+                verwerkt = task["review_feedback"] if "review_feedback" in task.keys() else None
+                if verwerkt:
+                    # Onthouden waartegen we straks vergelijken: krijgt de
+                    # beoordelaar hierna exact dezelfde herziening terug, dan
+                    # heeft deze ronde niets opgeleverd.
+                    self._verwerkte_feedback = verwerkt
                     self.scope.set_task(task_id, review_feedback=None)
                     task = self.scope.task(task_id)
                 self._log(
@@ -624,6 +632,15 @@ class Runner:
 
         Geeft None terug als er niets te hervatten valt.
         """
+        # Ligt er nog onverwerkte reviewerfeedback, dan voldoet het bestaande werk
+        # per definitie niet -- ongeacht hoe groen de verificatie staat. Zonder
+        # deze uitzondering gaat een hervatte taak rechtstreeks naar de
+        # beoordelaar, krijgt dezelfde herziening terug, en draait in een kring.
+        if task["review_feedback"] if "review_feedback" in task.keys() else None:
+            self._log("hervatting-overgeslagen", task_id=task_id,
+                      detail="er ligt reviewerfeedback die nog verwerkt moet worden")
+            return None
+
         base = self.project.default_branch
         aantal = run_git(worktree.path, "rev-list", "--count", f"{base}..HEAD",
                          check=False).strip()
@@ -746,7 +763,7 @@ class Runner:
             # de uitvoerder exact dezelfde prompt als daarvoor, maakt hij hetzelfde
             # werk opnieuw en geeft de beoordelaar hetzelfde oordeel: betaalde
             # rondjes zonder vooruitgang.
-            self.scope.set_task(task_id, review_feedback=json.dumps({
+            nieuwe_feedback = json.dumps({
                 "instructie": review.next_instruction,
                 "bevindingen": [
                     {"ernst": f.severity, "bestand": f.file, "punt": f.issue,
@@ -754,7 +771,27 @@ class Runner:
                     for f in review.findings
                 ],
                 "criteria_open": review.acceptance_missing,
-            }, ensure_ascii=False))
+            }, ensure_ascii=False)
+            vorige = (task["review_feedback"] if "review_feedback" in task.keys() else None) \
+                or getattr(self, "_verwerkte_feedback", None)
+            if vorige == nieuwe_feedback:
+                detail = (
+                    "de beoordelaar vraagt exact dezelfde herziening als de vorige"
+                    " ronde. Nog een poging levert hetzelfde op; hier is een"
+                    " menselijke blik nodig."
+                )
+                self.scope.set_task(task_id, status=TaskStatus.BLOCKED.value)
+                self._log("herhaalde-herziening", task_id=task_id,
+                          instructie=review.next_instruction, detail=detail)
+                self.notifier.send(Message(
+                    subject=f"Vastgelopen in herziening: {task['title'][:50]}",
+                    body=detail + "\n\nInstructie van de beoordelaar:\n"
+                         + (review.next_instruction or "(geen)"),
+                    project=self.project.slug, urgent=True, labels=["orch:block"],
+                ))
+                self.scope.end_run(run_id, "herhaalde_herziening")
+                return RunOutcome(TaskStatus.BLOCKED, detail)
+            self.scope.set_task(task_id, review_feedback=nieuwe_feedback)
             self.scope.end_run(run_id, "revise")
             return RunOutcome(TaskStatus.QUEUED, review.next_instruction or "herzien")
 

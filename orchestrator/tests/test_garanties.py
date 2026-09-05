@@ -156,42 +156,32 @@ class G6_FeedbackOverleeftHerstart(Lus):
 class G10_GeenBetaalde_Herhaling(Lus):
     """Dezelfde opdracht bij dezelfde toestand gaat niet nog eens naar een betaald model."""
 
-    def test_identieke_opdracht_bij_ongewijzigde_toestand_wordt_geblokkeerd(self):
-        """Drie rondes: pas als prompt EN toestand gelijk zijn, slaat de poort dicht.
+    def test_al_verstuurde_opdracht_gaat_niet_nog_een_keer(self):
+        """De poort kijkt naar prompt EN toestand van de branch.
 
-        Ronde 1 heeft nog geen feedback, ronde 2 wel: die prompts verschillen dus
-        terecht. Ronde 3 krijgt exact dezelfde feedback bij een onveranderde
-        werkmap -- dan levert nog een betaalde aanroep hetzelfde antwoord op.
+        Rechtstreeks getoetst in plaats van via drie ronden, want sinds er ook
+        een poort op herhaalde herzieningen zit, slaat die eerder dicht en zou
+        deze nooit meer aan de beurt komen.
         """
-        from orchestrator.adapters import Finding, ReviewResult
-        from orchestrator.models import Verdict
-
-        revise = ReviewResult(
-            verdict=Verdict.REVISE,
-            findings=[Finding(severity="major", file="a.py", issue="zelfde punt",
-                              fix="zelfde herstel")],
-            next_instruction="Zelfde instructie.",
-        )
-        # De uitvoerder verandert niets: de toestand blijft identiek.
-        runner = self.build(
-            checks={"tests": GROEN},
-            steps=[{}, {}, {}],
-            reviews=[revise, revise, revise],
-        )
+        runner = self.build(steps=[{"write": {"a.py": "x = 1\n"}}])
         task_id = self.task(runner)
 
-        self.assertEqual(runner.run_task(task_id).status, TaskStatus.QUEUED)
-        self.assertEqual(runner.run_task(task_id).status, TaskStatus.QUEUED)
-        na_twee = len(self.executor.calls)
-        self.assertEqual(na_twee, 2)
-
-        derde = runner.run_task(task_id)
-
-        self.assertEqual(derde.status, TaskStatus.BLOCKED)
-        self.assertEqual(
-            len(self.executor.calls), na_twee,
-            "er is opnieuw betaald voor dezelfde opdracht bij dezelfde toestand",
+        # Doe alsof deze opdracht al eens verstuurd is bij deze toestand.
+        worktree = runner.git.create_worktree(
+            self.project.repo_root, f"orch/{task_id}", self.project.default_branch
         )
+        taak = self.scope.task(task_id)
+        prompt = runner._build_prompt(taak, ["werkt"], [])
+        self.scope.remember_signature(
+            task_id, runner._opdracht_handtekening(prompt, worktree)
+        )
+        runner.git.remove_worktree(worktree)
+
+        uitkomst = runner.run_task(task_id)
+
+        self.assertEqual(uitkomst.status, TaskStatus.BLOCKED)
+        self.assertEqual(len(self.executor.calls), 0,
+                         "er is opnieuw betaald voor dezelfde opdracht")
         events = [r for r in self.scope.events(limit=50)
                   if r["kind"] == "herhaalde-opdracht"]
         self.assertTrue(events, "de tegengehouden herhaling is niet vastgelegd")
