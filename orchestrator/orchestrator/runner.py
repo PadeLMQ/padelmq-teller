@@ -348,6 +348,12 @@ class Runner:
                 )
                 self._charge(execution.usage, phase="implement", role="uitvoerder",
                              task_id=task_id, run_id=run_id)
+                # Pas nu vastleggen: de aanroep heeft werkelijk plaatsgevonden.
+                # Eerder vastleggen zou een taak die door de budgetrem of een
+                # crash werd tegengehouden voorgoed blokkeren.
+                self.scope.remember_signature(
+                    task_id, self._opdracht_handtekening(prompt, worktree)
+                )
                 if execution.session_id:
                     self.scope.set_task(task_id, claude_session_id=execution.session_id)
                 # De feedback is nu verwerkt; hem laten staan zou hem een ronde
@@ -544,8 +550,8 @@ class Runner:
             )
         return None
 
-    def _herhaalde_betaalde_context(self, task_id: int, prompt: str, worktree) -> bool:
-        """Is deze exacte betaalde opdracht al eens verstuurd?
+    def _opdracht_handtekening(self, prompt: str, worktree) -> str:
+        """De handtekening van deze betaalde opdracht.
 
         Dezelfde prompt bij dezelfde toestand van de werkmap levert hetzelfde
         antwoord op. Nog een keer versturen kost geld en brengt niets: dat is
@@ -557,8 +563,12 @@ class Runner:
         kop = run_git(worktree.path, "rev-parse", "HEAD", check=False).strip()
         vuil = run_git(worktree.path, "status", "--porcelain", check=False)
         ruw = f"uitvoerder\n{prompt}\n{kop}\n{vuil}"
-        handtekening = "impl:" + hashlib.sha256(ruw.encode()).hexdigest()
-        return self.scope.seen_signature(task_id, handtekening)
+        return "impl:" + hashlib.sha256(ruw.encode()).hexdigest()
+
+    def _herhaalde_betaalde_context(self, task_id: int, prompt: str, worktree) -> bool:
+        return self.scope.signature_seen(
+            task_id, self._opdracht_handtekening(prompt, worktree)
+        )
 
     def _verify(self, worktree, *, task_id: int):
         """Draait de verificatie en ruimt op wat de checks zelf veranderd hebben.

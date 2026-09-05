@@ -416,3 +416,42 @@ class G14_UitvoerderErftGeenVreemdGereedschap(unittest.TestCase):
 
         cmd = ClaudeExecutor("claude-opus-5")._command("doe iets", None)
         self.assertIn("--allowedTools", cmd)
+
+
+class G15_HandtekeningPasNaEenEchteAanroep(Lus):
+    """Een aanroep die nooit plaatsvond mag de taak niet permanent blokkeren.
+
+    Dit gebeurde echt: de budgetrem hield de aanroep tegen nadat de
+    handtekening al was vastgelegd, en daarna weigerde de herhalingspoort de
+    taak voorgoed.
+    """
+
+    def test_budgetstop_blokkeert_de_taak_niet_voorgoed(self):
+        from orchestrator.cost import CostGuard
+
+        runner = self.build(steps=[{"write": {"a.py": "x = 1\n"}}])
+        task_id = self.task(runner)
+
+        # Budget op nul: de aanroep wordt tegengehouden voordat hij gebeurt.
+        self.settings.budget_task_eur = 0.000001
+        eerste = runner.run_task(task_id)
+        self.assertEqual(eerste.status, TaskStatus.FAILED)
+        self.assertEqual(len(self.executor.calls), 0, "er is toch betaald")
+
+        # Ruimte erbij: dezelfde opdracht moet nu gewoon door mogen.
+        self.settings.budget_task_eur = 100.0
+        self.scope.set_task(task_id, status=TaskStatus.QUEUED.value)
+        tweede = runner.run_task(task_id)
+
+        self.assertEqual(tweede.status, TaskStatus.PR_OPEN,
+                         "de taak is geblokkeerd door een aanroep die nooit plaatsvond")
+        self.assertEqual(len(self.executor.calls), 1)
+
+    def test_een_echte_aanroep_wordt_wel_onthouden(self):
+        runner = self.build(steps=[{"write": {"a.py": "x = 1\n"}}])
+        task_id = self.task(runner)
+        runner.run_task(task_id)
+        handtekening = [r for r in self.db.conn.execute(
+            "SELECT signature FROM signatures WHERE task_id = ?", (task_id,))]
+        self.assertTrue(any(r["signature"].startswith("impl:") for r in handtekening),
+                        "de verstuurde opdracht is niet onthouden")

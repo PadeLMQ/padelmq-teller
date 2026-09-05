@@ -640,6 +640,31 @@ class ProjectScope:
         )
         return int(cur.rowcount or 0)
 
+    def signature_seen(self, task_id: int, signature: str) -> bool:
+        """Kijkt alleen. Legt niets vast.
+
+        Nodig omdat vastleggen en controleren niet hetzelfde moment zijn: een
+        aanroep die door de budgetrem wordt tegengehouden heeft nooit
+        plaatsgevonden en mag de taak niet permanent blokkeren.
+        """
+        if not signature:
+            return False
+        return bool(self._q(
+            "SELECT id FROM signatures WHERE project_id = ? AND task_id = ?"
+            " AND signature = ?",
+            (self.project_id, task_id, signature),
+        ))
+
+    def remember_signature(self, task_id: int, signature: str) -> None:
+        """Legt vast dat deze context werkelijk verstuurd is."""
+        if not signature or self.signature_seen(task_id, signature):
+            return
+        self.conn.execute(
+            "INSERT INTO signatures (project_id, task_id, signature, created_at)"
+            " VALUES (?,?,?,?)",
+            (self.project_id, task_id, signature, now()),
+        )
+
     def seen_signature(self, task_id: int, signature: str) -> bool:
         if not signature:
             return False
