@@ -70,6 +70,16 @@ class GitAdapter:
             raise GitError(f"{repo} is geen git-repository")
         target = self.workdir / branch.replace("/", "_")
         if target.exists():
+            if self._worktree_op_branch(target, branch):
+                # Hergebruiken in plaats van weggooien. Een worktree bevat naast
+                # de broncode ook de geinstalleerde afhankelijkheden, en die zijn
+                # niet gratis: weggooien betekent dat de verificatie daarna niet
+                # kan draaien. Wel de gevolgde bestanden terugzetten, want wat
+                # daar nog los staat is rommel van een eerdere poging -- het
+                # vastgelegde werk zit in de branch, niet in de werkmap.
+                run_git(target, "checkout", "--", ".", check=False)
+                run_git(repo, "fetch", "--all", "--quiet", check=False)
+                return Worktree(path=target, branch=branch, repo=repo)
             run_git(repo, "worktree", "remove", "--force", str(target), check=False)
         run_git(repo, "fetch", "--all", "--quiet", check=False)
         # Een eerdere poging kan gestrand zijn en de branch achtergelaten hebben.
@@ -82,6 +92,12 @@ class GitAdapter:
         else:
             run_git(repo, "worktree", "add", "-b", branch, str(target), base)
         return Worktree(path=target, branch=branch, repo=repo)
+
+    @staticmethod
+    def _worktree_op_branch(target: Path, branch: str) -> bool:
+        """Staat deze map er nog, en op de juiste branch?"""
+        huidig = run_git(target, "rev-parse", "--abbrev-ref", "HEAD", check=False)
+        return huidig.strip() == branch
 
     @staticmethod
     def _branch_exists(repo: Path, branch: str) -> bool:

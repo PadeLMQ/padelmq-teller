@@ -296,7 +296,7 @@ class Runner:
 
                 # 3 · verifiëren
                 self.scope.set_task(task_id, status=TaskStatus.VERIFYING.value)
-                verification = self.verifier.run(worktree.path, self.project.checks)
+                verification = self._verify(worktree, task_id=task_id)
                 self._log(
                     "verificatie", task_id=task_id, ok=verification.ok,
                     checks=[
@@ -460,6 +460,35 @@ class Runner:
             )
         return None
 
+    def _verify(self, worktree, *, task_id: int):
+        """Draait de verificatie en ruimt op wat de checks zelf veranderd hebben.
+
+        Een build schrijft gegenereerde bestanden terug in de werkmap. Die
+        wijziging hoort niet bij de taak, maar belandt wel in de diff die
+        beoordeeld en vastgelegd wordt -- de beoordelaar merkte dat terecht op
+        als ongerelateerde wijziging. We noteren dus wat er vooraf al openstond
+        en zetten daarna alleen terug wat er tijdens de verificatie bij kwam.
+        """
+        voor = self._gewijzigde_bestanden(worktree)
+        verification = self.verifier.run(worktree.path, self.project.checks)
+        erbij = sorted(self._gewijzigde_bestanden(worktree) - voor)
+        if erbij:
+            for pad in erbij:
+                run_git(worktree.path, "checkout", "--", pad, check=False)
+            self._log("verificatie-rommel", task_id=task_id, bestanden=erbij,
+                      detail="door de checks gewijzigde bestanden teruggezet")
+        return verification
+
+    @staticmethod
+    def _gewijzigde_bestanden(worktree) -> set[str]:
+        """Gevolgde bestanden met een wijziging. Nieuwe bestanden tellen niet mee."""
+        uit = run_git(worktree.path, "status", "--porcelain", check=False)
+        namen = set()
+        for regel in uit.splitlines():
+            if len(regel) > 3 and not regel.startswith("??"):
+                namen.add(regel[3:].strip())
+        return namen
+
     def _resume_phase(self, task_id: int, run_id: int, task, acceptance: list[str],
                       worktree) -> RunOutcome | None:
         """Kijkt of het werk van een eerdere poging nog voldoet.
@@ -482,7 +511,7 @@ class Runner:
             return None
 
         self.scope.set_task(task_id, status=TaskStatus.VERIFYING.value)
-        verification = self.verifier.run(worktree.path, self.project.checks)
+        verification = self._verify(worktree, task_id=task_id)
         self._log(
             "hervatting", task_id=task_id, commits=int(aantal), ok=verification.ok,
             checks=[

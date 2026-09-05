@@ -321,3 +321,32 @@ class Hervatten(Lus):
         events = [r for r in self.scope.events(limit=50)
                   if r["kind"] == "verificatie-onuitvoerbaar"]
         self.assertTrue(events, "de onuitvoerbare verificatie is niet vastgelegd")
+
+    def test_verificatie_ruimt_haar_eigen_rommel_op(self):
+        """Een check die een gevolgd bestand schrijft, mag de taakdiff niet vervuilen.
+
+        Dit gebeurde echt: npm run build schreef next-env.d.ts terug, die
+        wijziging belandde in de diff en de beoordelaar vroeg terecht om
+        herstel van een ongerelateerde wijziging.
+        """
+        # De check gedraagt zich als een build: hij schrijft in een bestand dat
+        # al in de repo staat, en slaagt.
+        check = (
+            "python3 -c \"import pathlib; "
+            "pathlib.Path('app.py').write_text('# door de build aangeraakt\\n')\""
+        )
+        runner = self.build(checks={"tests": check},
+                            steps=[{"write": {"nieuw.py": "x = 1\n"}}])
+        task_id = self.task(runner)
+        outcome = runner.run_task(task_id)
+
+        self.assertEqual(outcome.status, TaskStatus.PR_OPEN)
+        worktree_pad = self.tmp / "worktrees" / f"orch_{task_id}"
+        self.assertNotIn(
+            "app.py", run_git(worktree_pad, "diff", "--name-only", "main"),
+            "de wijziging van de check staat nog in de taakdiff",
+        )
+        events = [r for r in self.scope.events(limit=50)
+                  if r["kind"] == "verificatie-rommel"]
+        self.assertTrue(events, "het opruimen is niet vastgelegd")
+        self.assertIn("app.py", json.loads(events[0]["payload"])["bestanden"])
