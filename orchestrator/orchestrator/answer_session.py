@@ -123,6 +123,50 @@ def match_options(transcript: str, options: list[str]) -> list[str]:
     return treffers
 
 
+
+def _normaliseer(text: str) -> str:
+    """Kleine letters, leestekens als spatie, spaties samengevouwen."""
+    return re.sub(r"\s+", " ", re.sub(r"\W+", " ", (text or "").lower())).strip()
+
+
+def exacte_optiekeuze(transcript: str, options: list[str]) -> str | None:
+    """Wijst dit antwoord zonder enige interpretatie precies één optie aan?
+
+    Alleen dan mag de bevestigingsronde overgeslagen worden. Dat is een strengere
+    eis dan match_options(), dat ook op onderscheidende woorden matcht -- en
+    woorden herkennen is inferentie, hoe deterministisch de code ook is.
+
+    Wat telt:
+      - een optienummer op zichzelf: "2", "optie 2", "2."
+      - letterlijk de tekst van precies één optie
+
+    Wat niet telt, en dus wél bevestigd moet worden:
+      - "1 en 2", "niet 1", "2 maar alleen als ..." -- het antwoord is meer dan
+        een keuze
+      - "ja" terwijl de optie "Ja, waarschuwingen laten falen" heet -- dat is een
+        samenvatting, geen exacte keuze
+      - vrije tekst, extra voorwaarden, of iets wat op twee opties past
+
+    Geeft None terug zodra er ook maar iets te interpreteren valt. Geen model
+    betrokken: dit is een string die precies past of niet.
+    """
+    if not options:
+        return None
+    kaal = _normaliseer(transcript)
+    if not kaal:
+        return None
+
+    nummer = re.fullmatch(r"(?:optie |keuze |nummer )?(\d{1,2})", kaal)
+    if nummer:
+        index = int(nummer.group(1))
+        if 1 <= index <= len(options):
+            return options[index - 1]
+        return None
+
+    treffers = [o for o in options if _normaliseer(o) == kaal]
+    return treffers[0] if len(treffers) == 1 else None
+
+
 def assess(
     *,
     question: str,
@@ -225,10 +269,16 @@ class AnswerFlow:
     """De sessiemachine. Kanalen roepen alleen deze methodes aan."""
 
     def __init__(self, scope: ProjectScope, channel: str,
-                 interpreter: Interpreter | None = None):
+                 interpreter: Interpreter | None = None, *, transcribed: bool = False):
         self.scope = scope
         self.channel = channel
         self.interpreter = interpreter
+        # Komt de tekst uit een transcriptie, dan zegt "exact" alleen dat de
+        # transcriptie exact is -- niet dat er exact dat gezegd is. Zulke
+        # kanalen houden de bevestigingsronde, altijd. Het hangt aan het kanaal
+        # en niet aan een losse aanroep, want een correctieronde binnen hetzelfde
+        # gesprek is nog steeds spraak.
+        self.transcribed = transcribed
 
     # -- starten ---------------------------------------------------------
     def open(self, question_id: int, question_text: str, task_id: int | None = None) -> int:
@@ -257,6 +307,23 @@ class AnswerFlow:
 
         import json as _json
         options = _json.loads(question["options"] or "[]")
+
+        # Een antwoord dat zonder interpretatie precies één aangeboden optie
+        # aanwijst, hoeft niet nog eens bevestigd te worden: er valt niets te
+        # bevestigen wat niet al vaststaat. Alles wat ook maar iets van
+        # interpretatie vraagt, gaat wél door de bevestigingsronde.
+        # ... maar niet op een kanaal dat transcribeert; zie self.transcribed.
+        keuze = None if self.transcribed else exacte_optiekeuze(transcript, options)
+        if keuze is not None:
+            self.scope.set_answer_session(
+                session_id, state=SessionState.RESOLVED.value, interpretation=keuze,
+            )
+            self.scope.add_turn(session_id, "afgesloten", self.channel, keuze,
+                                note="exacte optiekeuze; geen bevestiging nodig")
+            return Step(Act.APPLY, keuze, Clarity.CLEAR,
+                        "het antwoord wijst zonder interpretatie precies één aangeboden"
+                        " optie aan")
+
         result = assess(
             question=question["text"],
             options=options,

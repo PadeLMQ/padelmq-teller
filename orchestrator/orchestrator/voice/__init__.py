@@ -70,7 +70,7 @@ class VoiceQueue:
                  interpreter: Interpreter | None = None):
         self.scope = scope
         self.project = project
-        self.flow = AnswerFlow(scope, CHANNEL, interpreter=interpreter)
+        self.flow = AnswerFlow(scope, CHANNEL, interpreter=interpreter, transcribed=True)
 
     # -- 1. wat staat er open ---------------------------------------------
     def next_question(self) -> VoicePrompt | None:
