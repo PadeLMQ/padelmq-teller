@@ -21,7 +21,7 @@ from .db import ProjectScope
 from .git import GitAdapter, GitError
 from .guards import NoProgressDetector, detect_invented_values
 from .models import (
-    Question, TaskStatus, Triage, VerificationResult, Verdict,
+    Question, TaskStatus, Triage, TriageResult, VerificationResult, Verdict,
 )
 from .notify import Message, Notifier
 from .projects import Project
@@ -363,6 +363,10 @@ class Runner:
                 candidates = result.questions
 
         answered: list[Question] = []
+        # Eerst de hele batch beoordelen. Vroegtijdig teruggeven zou de vragen
+        # die al betaald zijn weggooien; die komen dan een volgende ronde
+        # opnieuw langs en kosten opnieuw geld.
+        uitgesteld: list[tuple[Question, TriageResult]] = []
         for question in candidates:
             decision = engine.decide(question)
             self._log(
@@ -377,13 +381,25 @@ class Runner:
                 question.proposed_answer = decision.answer
                 answered.append(question)
                 self._auto_answers.append(question)
-                continue
+            else:
+                uitgesteld.append((question, decision))
+
+        if not uitgesteld:
+            return answered, None
+
+        # Alles vastleggen; de zwaarste uitkomst bepaalt de taakstatus.
+        for question, decision in uitgesteld:
             self._park_or_block(task_id, question, decision.outcome, decision.reason)
-            status = (
-                TaskStatus.PARKED if decision.outcome is Triage.PARK else TaskStatus.BLOCKED
-            )
-            return answered, RunOutcome(status, decision.reason)
-        return answered, None
+        blokkerend = next(
+            ((q, d) for q, d in uitgesteld if d.outcome is Triage.BLOCK), None
+        )
+        question, decision = blokkerend or uitgesteld[0]
+        status = TaskStatus.BLOCKED if blokkerend else TaskStatus.PARKED
+        self.scope.set_task(task_id, status=status.value)
+        toelichting = decision.reason
+        if len(uitgesteld) > 1:
+            toelichting += f" (en {len(uitgesteld) - 1} andere vraag/vragen uit dezelfde ronde)"
+        return answered, RunOutcome(status, toelichting)
 
     def _guard_phase(
         self, task_id: int, execution: ExecutionResult, worktree, task, baseline

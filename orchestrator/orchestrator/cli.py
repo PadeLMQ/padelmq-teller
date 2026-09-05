@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
+from datetime import date
 from pathlib import Path
 
 from . import __version__
@@ -188,6 +190,18 @@ def cmd_costs(args) -> int:
               f" {row['calls']:>9} {row['cost']:>8.2f}")
     print(f"{'':20} {'':22} {'totaal':14} {'':>9} {total:>8.2f}")
     print(f"\nglobaal dagbudget: €{settings.budget_global_daily_eur:.2f}")
+
+    maand = (args.day or date.today().isoformat())[:7]
+    per_project = []
+    for slug in projects_mod.list_projects(settings):
+        bedrag = db.scope(slug).spend_month(maand)
+        if bedrag:
+            per_project.append((slug, bedrag))
+    if per_project:
+        print(f"\nmaand {maand}:")
+        for slug, bedrag in sorted(per_project, key=lambda p: -p[1]):
+            print(f"  {slug:24} €{bedrag:>8.2f}")
+        print(f"  {'totaal':24} €{sum(b for _, b in per_project):>8.2f}")
     return 0
 
 
@@ -217,6 +231,22 @@ def cmd_import_chatgpt(args) -> int:
     return 1
 
 
+def _sleutel_status(naam: str) -> str:
+    """Meldt of een geheim gezet is, zonder ooit de waarde te tonen.
+
+    De vingerafdruk is de eerste acht tekens van de sha256. Daarmee kun je twee
+    omgevingen vergelijken ("staat overal dezelfde sleutel?") zonder dat de
+    sleutel zelf ergens in beeld of in een logboek komt.
+    """
+    import hashlib
+
+    waarde = os.environ.get(naam, "")
+    if not waarde:
+        return "NIET gezet"
+    afdruk = hashlib.sha256(waarde.encode()).hexdigest()[:8]
+    return f"gezet (vingerafdruk {afdruk})"
+
+
 def cmd_doctor(args) -> int:
     settings = _settings()
     print(f"orchestrator {__version__}")
@@ -229,7 +259,18 @@ def cmd_doctor(args) -> int:
     print(f"budget/dag     globaal €{settings.budget_global_daily_eur:.2f},"
           f" project €{settings.budget_project_daily_eur:.2f},"
           f" taak €{settings.budget_task_eur:.2f}")
+    print("geheimen:")
+    for naam in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ORCH_GITHUB_TOKEN",
+                 "ORCH_VOICE_TOKEN"):
+        print(f"  {naam:20} {_sleutel_status(naam)}")
+
     problems = []
+    if not os.environ.get("OPENAI_API_KEY"):
+        problems.append("OPENAI_API_KEY ontbreekt; de reviewer kan niet draaien")
+    try:
+        import openai  # noqa: F401
+    except ImportError:
+        problems.append("pakket 'openai' ontbreekt; pip install \"openai>=1.0\"")
     if settings.reviewer_model not in settings.prices:
         problems.append(
             f"geen prijs bekend voor {settings.reviewer_model};"
@@ -276,7 +317,22 @@ def _build_runner(settings, db, project):
             f"waarschuwing: {level} op {pct:.0%} (€{spent:.2f} van €{limit:.2f})"
         ),
     )
-    reviewer = OpenAIReviewer(settings.reviewer_model) if project.reviewer_enabled else None
+    reviewer = None
+    if project.reviewer_enabled:
+        from .reviewcache import ReviewCache
+
+        scope = db.scope(project.slug)
+        reviewer = ReviewCache(
+            OpenAIReviewer(settings.reviewer_model),
+            scope,
+            settings.reviewer_model,
+            on_hit=lambda soort, sleutel, usage: scope.log(
+                "cache-treffer",
+                {"soort": soort, "sleutel": sleutel[:16],
+                 "bespaarde_tokens_in": usage.tokens_in,
+                 "bespaarde_tokens_uit": usage.tokens_out},
+            ),
+        )
     github = GitHubClient() if project.github_repo else None
     return Runner(
         settings=settings,

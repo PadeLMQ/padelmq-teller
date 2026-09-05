@@ -41,27 +41,73 @@ eraan gekoppeld zijn.
 5. Controleer op GitHub dat de repository **private** staat.
 6. Verwijder `orchestrator/` uit `padelmq-teller` in een **aparte** commit.
 
-### A2. De sleutels en de omgeving
+### A2. De OpenAI-sleutel, veilig — vijf stappen
+
+**Stap 1 — maak de sleutel aan.**
+platform.openai.com → **API keys** → *Create new secret key*. Geef hem een naam
+als `padelmq-orchestrator`. Beperk hem tot één project als je meerdere projecten
+hebt. Je ziet de waarde **één keer**; kopieer hem meteen naar je wachtwoordbeheerder.
+
+**Stap 2 — zet er een kostenplafond op, vóór je hem gebruikt.**
+platform.openai.com → **Settings → Limits**:
+
+| | |
+|---|---|
+| *Budget limit* (hard) | het bedrag waarbij de API **stopt**. Zet dit laag — bijvoorbeeld €10 voor de eerste maand. |
+| *Email threshold* (soft) | waar je een waarschuwing wilt, bijvoorbeeld €5. |
+
+Dit is jouw vangnet bij OpenAI zelf, onafhankelijk van de orkestrator. De
+orkestrator heeft zijn eigen rem (§9 van het ontwerp), maar twee onafhankelijke
+plafonds is beter dan één.
+
+**Stap 3 — zet de variabelen in de permanente omgeving.**
+Niet in een gesprek, niet in git, niet in een tijdelijke sessie.
+
+*Op de VPS* — dat is de productieplek:
 
 ```bash
-cp orchestrator/.env.example .env && chmod 600 .env
+sudo -u orchestrator install -m 600 /dev/null /opt/orchestrator/.env
+sudo -u orchestrator nano /opt/orchestrator/.env
 ```
 
-Invullen, en verder nergens neerzetten:
+Invullen:
 
-| Variabele | Waarvoor | Opmerking |
-|---|---|---|
-| `OPENAI_API_KEY` | de reviewer | zet een **maandplafond** in het OpenAI-dashboard |
-| `ORCH_REVIEWER_MODEL` | welk model | het goedkoopste dat de validatie betrouwbaar aankan |
-| `ORCH_REVIEWER_PRICE_IN` / `_OUT` | prijs per miljoen tokens, in euro | zonder deze twee weigert de kostenbewaking de reviewer |
-| `ANTHROPIC_API_KEY` | Claude als uitvoerder | met eigen plafond |
-| `ORCH_DATA_DIR` | de datamap | **buiten elke git-repo**; de orkestrator weigert te starten als hij binnen een werkboom ligt |
+```
+OPENAI_API_KEY=...
+ANTHROPIC_API_KEY=...
+ORCH_REVIEWER_MODEL=...
+ORCH_REVIEWER_PRICE_IN=...
+ORCH_REVIEWER_PRICE_OUT=...
+ORCH_DATA_DIR=/var/lib/orchestrator
+ORCH_GITHUB_TOKEN=...
+```
+
+De systemd-units in `deploy/` lezen dit bestand via `EnvironmentFile`. Zo staan de
+sleutels op één plek, met rechten `600`, en overleven ze elke herstart.
+
+*Wil je dat een Claude Code-sessie het draaiboek voor je uitvoert*, zet dezelfde
+variabelen dan bij de **omgeving** van je remote sessie in plaats van in een
+gesprek: https://code.claude.com/docs/en/claude-code-on-the-web
+
+**Stap 4 — installeer het pakket.**
 
 ```bash
-pip install "openai>=1.0"
+sudo -u orchestrator /opt/orchestrator/.venv/bin/pip install "openai>=1.0"
 ```
 
-**Plak geen enkele sleutel in de chat.**
+**Stap 5 — controleer, zonder de sleutel te tonen.**
+
+```bash
+orchestrator doctor
+```
+
+Toont per geheim alleen `gezet` of `NIET gezet`, met een **vingerafdruk** — de
+eerste acht tekens van een sha256. Daarmee kun je nagaan of op twee plekken
+dezelfde sleutel staat, zonder dat de waarde ergens in beeld of in een logboek
+komt. De volledige waarde wordt nergens getoond, gelogd of naar een model
+gestuurd.
+
+Alles groen? Dan door naar Deel B.
 
 ---
 
@@ -210,6 +256,35 @@ volledige testlus met nepmodellen:
 Punt 4 is het punt waar ik het meeste aan hecht: het toont niet "de reviewer had
 context", maar **welke items met welke status**, plus een hash waarmee je
 achteraf kunt vaststellen dat het exact die tekst was.
+
+---
+
+## Deel D — de kostenregels, en waar ze zitten
+
+Doel: **maximale veilige autonomie per betaalde aanroep.** Nooit ten koste van
+veiligheid.
+
+| Regel | Waar het zit | Status |
+|---|---|---|
+| Geen GPT-call na elke kleine wijziging | De lus roept de reviewer **niet** aan bij een rode verificatie; Claude herstelt zelf en itereert. De reviewer komt pas op groen. | Was al zo — nu met een test die het bewaakt |
+| Vragen bundelen | Alle openstaande vragen van één stap gaan in **één** aanroep, niet één per vraag | Was al zo — nu met een test |
+| De hele batch vastleggen | Bij een PARK of BLOCK worden **alle** vragen uit de batch vastgelegd, niet alleen de eerste. Anders komen al betaalde vragen een ronde later opnieuw langs en kosten ze opnieuw geld | **Nieuw** |
+| Minimale relevante context | Alleen **bevestigde** items gaan volledig mee — alleen die kunnen een AUTO dragen. Van de rest gaat de titel mee met de status, zodat de reviewer weet dát ze bestaan en ernaar kan vragen. Weglaten zou de betrouwbaarheid schaden; volledig meesturen is verspilling | **Nieuw** |
+| Hergebruik zonder blind te cachen | De sleutel bevat de vraag, de bevestigde kennis, de diff, de acceptatiecriteria, de verificatie-uitslag en het model. Verandert er iets, dan verandert de sleutel en wordt er gewoon opnieuw gevraagd | **Nieuw** |
+| De veiligheidspoort blijft live | Wat de cache bewaart is het **ruwe antwoord** van de reviewer, niet de beslissing. De triage draait bij een treffer opnieuw, tegen de actuele kennisbasis | **Nieuw** |
+| Caches lekken niet tussen projecten | De cachetabel is per project gescopeerd, net als al het andere | **Nieuw**, met test |
+| Kosten per maand | Naast per call, taak, project en dag | **Nieuw** |
+| "€X = €A Claude + €B GPT" | In het runrapport, verdeeld op **rol** en niet op modelnaam | **Nieuw** |
+| Nooit gokken om een call te sparen | De triage laat een niet-bevestigde bron nooit als AUTO door, wat een besparing ook zou zijn | Was al zo — nu met een test die het expliciet vastlegt |
+
+**Modelkeuze.** De modellen zijn per rol instelbaar (`ORCH_EXECUTOR_MODEL`,
+`ORCH_TRIAGE_MODEL`, `ORCH_REVIEWER_MODEL`). Er komt bewust **geen** slimme
+routering vóór P0: eerst meten wat een echte taak kost, dan pas beslissen waar
+een goedkoper model volstaat.
+
+**Budgetten.** De huidige waarden (€5/dag globaal, €2/taak) zijn **voorlopig** en
+staan er alleen omdat een bug nooit onbeperkt geld mag kosten. Na de eerste
+pilots stellen we ze bij op gemeten cijfers, niet op een gok.
 
 ---
 

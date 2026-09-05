@@ -102,6 +102,24 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS ix_events_project ON events(project_id, ts);
 
+-- Hergebruik van reviewerantwoorden. De sleutel bevat alles wat het antwoord
+-- materieel kan beinvloeden, dus een hit betekent per definitie: dezelfde vraag,
+-- dezelfde bevestigde kennis, dezelfde code, dezelfde criteria, hetzelfde model.
+CREATE TABLE IF NOT EXISTS reviewer_cache (
+    id          INTEGER PRIMARY KEY,
+    project_id  INTEGER NOT NULL REFERENCES projects(id),
+    soort       TEXT NOT NULL,
+    sleutel     TEXT NOT NULL,
+    model       TEXT NOT NULL,
+    resultaat   TEXT NOT NULL,
+    tokens_in   INTEGER NOT NULL DEFAULT 0,
+    tokens_out  INTEGER NOT NULL DEFAULT 0,
+    treffers    INTEGER NOT NULL DEFAULT 0,
+    created_at  TEXT NOT NULL
+);
+CREATE UNIQUE INDEX IF NOT EXISTS ix_cache_sleutel
+    ON reviewer_cache(project_id, soort, sleutel);
+
 CREATE TABLE IF NOT EXISTS answer_sessions (
     id             INTEGER PRIMARY KEY,
     project_id     INTEGER NOT NULL REFERENCES projects(id),
@@ -463,6 +481,53 @@ class ProjectScope:
             "SELECT * FROM events WHERE project_id = ? ORDER BY id DESC LIMIT ?",
             (self.project_id, limit),
         )
+
+    # -- hergebruik van reviewerantwoorden -------------------------------
+    def cache_get(self, soort: str, sleutel: str) -> sqlite3.Row | None:
+        rows = self._q(
+            "SELECT * FROM reviewer_cache WHERE project_id = ? AND soort = ? AND sleutel = ?",
+            (self.project_id, soort, sleutel),
+        )
+        if not rows:
+            return None
+        self.conn.execute(
+            "UPDATE reviewer_cache SET treffers = treffers + 1"
+            " WHERE project_id = ? AND soort = ? AND sleutel = ?",
+            (self.project_id, soort, sleutel),
+        )
+        return rows[0]
+
+    def cache_put(
+        self, soort: str, sleutel: str, model: str, resultaat: str,
+        tokens_in: int = 0, tokens_out: int = 0,
+    ) -> None:
+        self.conn.execute(
+            "INSERT OR REPLACE INTO reviewer_cache (project_id, soort, sleutel, model,"
+            " resultaat, tokens_in, tokens_out, treffers, created_at)"
+            " VALUES (?,?,?,?,?,?,?,COALESCE((SELECT treffers FROM reviewer_cache"
+            " WHERE project_id = ? AND soort = ? AND sleutel = ?), 0), ?)",
+            (self.project_id, soort, sleutel, model, resultaat, tokens_in, tokens_out,
+             self.project_id, soort, sleutel, now()),
+        )
+
+    def cache_stats(self) -> dict:
+        row = self.conn.execute(
+            "SELECT COUNT(*) AS regels, COALESCE(SUM(treffers), 0) AS treffers,"
+            " COALESCE(SUM(treffers * tokens_in), 0) AS bespaard_in,"
+            " COALESCE(SUM(treffers * tokens_out), 0) AS bespaard_uit"
+            " FROM reviewer_cache WHERE project_id = ?",
+            (self.project_id,),
+        ).fetchone()
+        return dict(row)
+
+    def spend_month(self, maand: str) -> float:
+        """maand als 'JJJJ-MM'."""
+        row = self.conn.execute(
+            "SELECT COALESCE(SUM(cost_eur), 0) AS total FROM calls"
+            " WHERE project_id = ? AND substr(day, 1, 7) = ?",
+            (self.project_id, maand),
+        ).fetchone()
+        return float(row["total"])
 
     # -- antwoordsessies en audit spoor ----------------------------------
     def start_answer_session(

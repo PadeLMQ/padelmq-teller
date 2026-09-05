@@ -182,15 +182,39 @@ class KnowledgeStore:
         ]
 
     def as_prompt_context(self, max_chars: int = 20000) -> str:
+        """De context die naar de reviewer gaat.
+
+        Bevestigde items gaan volledig mee: alleen die mogen als bron dienen
+        voor een automatisch antwoord. Van de rest gaat alleen de titel mee, met
+        de status erbij. Zo weet de reviewer dát die kennis bestaat — hij kan er
+        zelfs naar vragen — maar we betalen niet voor tekst die toch nooit een
+        AUTO kan dragen. Weglaten zou de betrouwbaarheid schaden; volledig
+        meesturen is verspilling.
+        """
         if not self._cache:
             self.load()
-        chunks = []
+        bevestigd: list[str] = []
+        overig: list[str] = []
         for item in sorted(self._cache.values(), key=lambda i: (i.file, i.item_id)):
-            chunks.append(
-                f"[{item.item_id}] ({item.status.value}) {item.title}\n{item.body}".strip()
+            if item.citable:
+                bevestigd.append(
+                    f"[{item.item_id}] ({item.status.value}) {item.title}\n{item.body}".strip()
+                )
+            else:
+                overig.append(f"[{item.item_id}] ({item.status.value}) {item.title}")
+
+        delen = []
+        if bevestigd:
+            delen.append("BEVESTIGDE PROJECTKENNIS — alleen hieruit mag je citeren:\n\n"
+                         + "\n\n".join(bevestigd))
+        if overig:
+            delen.append(
+                "NIET BEVESTIGD — bestaat wel, maar mag NOOIT als bron dienen. "
+                "Is het antwoord hiervan afhankelijk, meld dat dan in plaats van te "
+                "antwoorden:\n"
+                + "\n".join(overig)
             )
-        joined = "\n\n".join(chunks)
-        return joined[:max_chars]
+        return "\n\n".join(delen)[:max_chars]
 
     # -- schrijven -------------------------------------------------------
     def next_decision_id(self) -> str:

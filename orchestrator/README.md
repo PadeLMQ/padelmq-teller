@@ -82,7 +82,7 @@ orchestrator secret-scan .               # staat er niets geheims in git?
 python3 -m unittest discover -s tests -t .
 ```
 
-151 tests, geen externe afhankelijkheden nodig behalve PyYAML en `git`. De lus
+169 tests, geen externe afhankelijkheden nodig behalve PyYAML en `git`. De lus
 wordt end-to-end getest met een echte git-repository en echte
 verificatiecommando's; alleen de modellen zijn nepobjecten.
 

@@ -1,6 +1,6 @@
 # Universele AI Development Orchestrator — haalbaarheidsanalyse & technisch ontwerp
 
-**Versie:** 8 — P0 is startklaar; alleen de OpenAI-sleutel ontbreekt nog.
+**Versie:** 9 — kostenregels verwerkt; P0 startklaar op de OpenAI-sleutel na.
 **Status:** ontwerp vastgesteld. Kern gebouwd. Pilot: **PadeLMQ/padelmq-pro**.
 **Datum:** 5 september 2026
 **Opdrachtgever:** Mathias (PadeLMQ)
@@ -380,7 +380,31 @@ elke toestand → FAILED  (budget op · time-out · herhaalde fout)
 
 ---
 
-## 11. Kostenbewaking (B1)
+## 11. Kostenbewaking en kostenminimalisatie (B1)
+
+**Grondregel: maximale veilige autonomie per betaalde aanroep.** De handmatige
+werkwijze is in feite gratis; het automatiseren ervan mag geen onnodige factuur
+opleveren. Maar besparen mag nooit betekenen dat er gegokt wordt: ontbreekt
+bevestigde informatie, dan is het AUTO niet, en dus PARK of BLOCK.
+
+De regels en waar ze zitten, staan in Deel D van
+[`p0-startdraaiboek.md`](p0-startdraaiboek.md). Kort:
+
+- de reviewer wordt **niet** aangeroepen bij een rode verificatie — Claude
+  herstelt zelf en itereert; de reviewer komt pas op groen;
+- alle openstaande vragen van een stap gaan in **één** aanroep;
+- bij PARK of BLOCK wordt de **hele batch** vastgelegd, zodat al betaalde vragen
+  niet een ronde later opnieuw langskomen;
+- alleen **bevestigde** kennis gaat volledig mee; van de rest alleen de titel met
+  de status, want die kan toch nooit een AUTO dragen;
+- reviewerantwoorden worden hergebruikt op een sleutel die vraag, bevestigde
+  kennis, diff, acceptatiecriteria, verificatie-uitslag en model bevat — verandert
+  er iets, dan wordt er gewoon opnieuw gevraagd;
+- wat bewaard wordt is het ruwe antwoord, niet de beslissing: de triage draait bij
+  een treffer opnieuw tegen de actuele kennisbasis, dus de veiligheidspoort wordt
+  nooit overgeslagen.
+
+
 
 **Meten.** Elke modelaanroep logt project, taak, run, fase, model, rol, invoertokens,
 uitvoertokens, cachehits, kosten en tijdstip. Daaruit rolt elke doorsnede: per project,

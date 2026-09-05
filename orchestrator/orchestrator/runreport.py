@@ -81,6 +81,26 @@ def build_report(scope: ProjectScope, project: Project, task_id: int) -> Report:
         m["cache_gelezen"] += call["cached_in"]
         m["kosten_eur"] = round(m["kosten_eur"] + call["cost_eur"], 4)
 
+    # --- 9b: kosten per aanbieder ("EUR X = EUR A Claude + EUR B GPT") ----
+    # De rol is betrouwbaarder dan de modelnaam: de uitvoerder is altijd Claude,
+    # de beantwoorder en beoordelaar altijd de reviewer. De modelnaam dient
+    # alleen als terugval voor aanroepen zonder bekende rol.
+    ROL_NAAR_AANBIEDER = {
+        "uitvoerder": "Claude",
+        "beantwoorder": "GPT",
+        "beoordelaar": "GPT",
+    }
+    per_aanbieder: dict[str, dict] = {}
+    for call in calls:
+        aanbieder = ROL_NAAR_AANBIEDER.get(call["role"])
+        if aanbieder is None:
+            aanbieder = "Claude" if call["model"].lower().startswith("claude") else "GPT"
+        a = per_aanbieder.setdefault(aanbieder, {"aanroepen": 0, "kosten_eur": 0.0})
+        a["aanroepen"] += 1
+        a["kosten_eur"] = round(a["kosten_eur"] + call["cost_eur"], 4)
+
+    treffers = [e for e in voor_taak if e["kind"] == "cache-treffer"]
+
     # --- 10: looptijd ----------------------------------------------------
     start = _tijd(taak["created_at"])
     starts = [_tijd(r["started_at"]) for r in runs if r["started_at"]]
@@ -181,6 +201,14 @@ def build_report(scope: ProjectScope, project: Project, task_id: int) -> Report:
         "9_tokens_en_kosten": {
             "per_model": per_model,
             "totaal_eur": round(sum(c["cost_eur"] for c in calls), 4),
+        },
+        "9b_kosten_per_aanbieder": per_aanbieder,
+        "9c_hergebruik": {
+            "cache_treffers": len(treffers),
+            "bespaarde_tokens_in": sum(
+                e["payload"].get("bespaarde_tokens_in", 0) for e in treffers),
+            "bespaarde_tokens_uit": sum(
+                e["payload"].get("bespaarde_tokens_uit", 0) for e in treffers),
         },
         "10_looptijd": {
             "eerste_run": eerste_run.isoformat() if eerste_run else None,
@@ -324,7 +352,19 @@ def format_report(report: Report) -> str:
               f"| {m['cache_gelezen']} | €{m['kosten_eur']:.4f} |"]
     if not k["per_model"]:
         r += ["| (geen aanroepen) | | | | | |"]
-    r += ["", f"**Totaal: €{k['totaal_eur']:.4f}**", ""]
+    r += ["", f"**Totaal: €{k['totaal_eur']:.4f}**"]
+    ap = d["9b_kosten_per_aanbieder"]
+    if ap:
+        onderdelen = " + ".join(
+            f"€{v['kosten_eur']:.4f} {naam}" for naam, v in sorted(ap.items())
+        )
+        r += [f"Deze taak heeft €{k['totaal_eur']:.4f} gekost: {onderdelen}."]
+    h = d["9c_hergebruik"]
+    if h["cache_treffers"]:
+        r += [f"Hergebruikt uit de cache: {h['cache_treffers']} reviewerantwoord(en), "
+              f"{h['bespaarde_tokens_in']} invoer- en {h['bespaarde_tokens_uit']} "
+              "uitvoertokens niet opnieuw betaald."]
+    r += [""]
 
     lt = d["10_looptijd"]
     if lt["seconden"] is None:
