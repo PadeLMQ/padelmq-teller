@@ -21,8 +21,16 @@ class GitHubError(RuntimeError):
 
 
 class GitHubClient:
+    # Geen sleutel in de omgeving hoeft geen fout te zijn: draait de sessie
+    # achter een credential-proxy, dan wordt de Authorization-header buiten deze
+    # runtime ingezet en hoort het geheim hier juist niet te staan. De SDK-loze
+    # aanroep hieronder moet dan wel een waarde meesturen; deze placeholder is
+    # geen geheim. Zonder proxy faalt de aanroep gewoon met 401, dus het is
+    # geen stille terugval op een andere route.
+    PLACEHOLDER = "placeholder-credential-proxy"
+
     def __init__(self, token: str | None = None, repo: str = ""):
-        self.token = token or os.environ.get("ORCH_GITHUB_TOKEN", "")
+        self.token = token or os.environ.get("ORCH_GITHUB_TOKEN", "") or self.PLACEHOLDER
         self.repo = repo
 
     def _request(self, method: str, path: str, payload: dict | None = None) -> dict | list:
