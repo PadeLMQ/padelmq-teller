@@ -247,7 +247,7 @@ def build_report(scope: ProjectScope, project: Project, task_id: int) -> Report:
     return Report(project=scope.slug, task_id=task_id, data=data)
 
 
-def format_report(report: Report) -> str:
+def format_report(report: Report, symbol: str = "$") -> str:
     d = report.data
     r: list[str] = [f"# Runrapport — {report.project} · taak {report.task_id}", ""]
 
@@ -349,16 +349,16 @@ def format_report(report: Report) -> str:
           "|---|---:|---:|---:|---:|---:|"]
     for model, m in sorted(k["per_model"].items()):
         r += [f"| `{model}` | {m['aanroepen']} | {m['tokens_in']} | {m['tokens_uit']} "
-              f"| {m['cache_gelezen']} | €{m['kosten_eur']:.4f} |"]
+              f"| {m['cache_gelezen']} | {symbol}{m['kosten_eur']:.4f} |"]
     if not k["per_model"]:
         r += ["| (geen aanroepen) | | | | | |"]
-    r += ["", f"**Totaal: €{k['totaal_eur']:.4f}**"]
+    r += ["", f"**Totaal: {symbol}{k['totaal_eur']:.4f}**"]
     ap = d["9b_kosten_per_aanbieder"]
     if ap:
         onderdelen = " + ".join(
-            f"€{v['kosten_eur']:.4f} {naam}" for naam, v in sorted(ap.items())
+            f"{symbol}{v['kosten_eur']:.4f} {naam}" for naam, v in sorted(ap.items())
         )
-        r += [f"Deze taak heeft €{k['totaal_eur']:.4f} gekost: {onderdelen}."]
+        r += [f"Deze taak heeft {symbol}{k['totaal_eur']:.4f} gekost: {onderdelen}."]
     h = d["9c_hergebruik"]
     if h["cache_treffers"]:
         r += [f"Hergebruikt uit de cache: {h['cache_treffers']} reviewerantwoord(en), "
@@ -402,5 +402,6 @@ def format_report(report: Report) -> str:
     return "\n".join(r)
 
 
-def build_and_format(db: Database, project: Project, task_id: int) -> str:
-    return format_report(build_report(db.scope(project.slug), project, task_id))
+def build_and_format(db: Database, project: Project, task_id: int,
+                     symbol: str = "$") -> str:
+    return format_report(build_report(db.scope(project.slug), project, task_id), symbol)

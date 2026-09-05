@@ -182,14 +182,15 @@ def cmd_costs(args) -> int:
     if not rows:
         print("nog geen kosten geregistreerd voor deze dag")
         return 0
-    print(f"{'project':20} {'model':22} {'rol':14} {'aanroepen':>9} {'kosten':>9}")
+    print(f"{'project':20} {'model':22} {'rol':14} {'aanroepen':>9}"
+          f" {'kosten (' + settings.currency + ')':>13}")
     total = 0.0
     for row in rows:
         total += row["cost"]
         print(f"{row['project']:20} {row['model']:22} {row['role']:14}"
-              f" {row['calls']:>9} {row['cost']:>8.2f}")
-    print(f"{'':20} {'':22} {'totaal':14} {'':>9} {total:>8.2f}")
-    print(f"\nglobaal dagbudget: €{settings.budget_global_daily_eur:.2f}")
+              f" {row['calls']:>9} {row['cost']:>12.4f}")
+    print(f"{'':20} {'':22} {'totaal':14} {'':>9} {total:>12.4f}")
+    print(f"\nglobaal dagbudget: {settings.symbol}{settings.budget_global_daily_eur:.2f}")
 
     maand = (args.day or date.today().isoformat())[:7]
     per_project = []
@@ -200,8 +201,9 @@ def cmd_costs(args) -> int:
     if per_project:
         print(f"\nmaand {maand}:")
         for slug, bedrag in sorted(per_project, key=lambda p: -p[1]):
-            print(f"  {slug:24} €{bedrag:>8.2f}")
-        print(f"  {'totaal':24} €{sum(b for _, b in per_project):>8.2f}")
+            print(f"  {slug:24} {settings.symbol}{bedrag:>10.4f}")
+        print(f"  {'totaal':24} {settings.symbol}"
+              f"{sum(b for _, b in per_project):>10.4f}")
     return 0
 
 
@@ -256,9 +258,11 @@ def cmd_doctor(args) -> int:
     print(f"projecten      {', '.join(projects_mod.list_projects(settings)) or 'geen'}")
     print(f"uitvoerder     {settings.executor_model}")
     print(f"beoordelaar    {settings.reviewer_model}")
-    print(f"budget/dag     globaal €{settings.budget_global_daily_eur:.2f},"
-          f" project €{settings.budget_project_daily_eur:.2f},"
-          f" taak €{settings.budget_task_eur:.2f}")
+    print(f"valuta         {settings.currency} (geen omrekening; tarieven moeten in "
+          f"deze valuta staan)")
+    print(f"budget/dag     globaal {settings.symbol}{settings.budget_global_daily_eur:.2f},"
+          f" project {settings.symbol}{settings.budget_project_daily_eur:.2f},"
+          f" taak {settings.symbol}{settings.budget_task_eur:.2f}")
     print("geheimen:")
     for naam in ("ANTHROPIC_API_KEY", "OPENAI_API_KEY", "ORCH_GITHUB_TOKEN",
                  "ORCH_VOICE_TOKEN"):
@@ -501,7 +505,7 @@ def cmd_report(args) -> int:
     db = _db(settings)
     project = projects_mod.load(settings, args.project)
     rapport = build_report(db.scope(args.project), project, args.task_id)
-    print(rapport.as_json() if args.json else format_report(rapport))
+    print(rapport.as_json() if args.json else format_report(rapport, settings.symbol))
     return 0
 
 

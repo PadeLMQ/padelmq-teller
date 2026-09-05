@@ -23,7 +23,12 @@ def _env_float(name: str, default: float) -> float:
 
 @dataclass
 class ModelPrice:
-    """Prijs per miljoen tokens, in euro."""
+    """Prijs per miljoen tokens, in de valuta van ORCH_CURRENCY.
+
+    Er wordt nergens omgerekend. Vul je de tarieven van de provider in dollar in,
+    dan zijn alle bedragen in de rapportage dollars. Een omrekening naar euro is
+    een aparte handeling met een koers en een datum die jij kiest.
+    """
 
     input_per_mtok: float
     output_per_mtok: float
@@ -54,6 +59,10 @@ class Settings:
     budget_task_eur: float = 2.0
     budget_run_eur: float = 1.0
 
+    # De munt waarin de tarieven zijn ingevuld. Alleen een etiket: er wordt
+    # nergens omgerekend, dus dit moet kloppen met wat je in de tarieven zet.
+    currency: str = "USD"
+
     max_review_rounds: int = 3
     run_timeout_seconds: int = 1800
 
@@ -72,6 +81,7 @@ class Settings:
             executor_model=os.environ.get("ORCH_EXECUTOR_MODEL", "claude-opus-5"),
             triage_model=os.environ.get("ORCH_TRIAGE_MODEL", "claude-haiku-4-5"),
             reviewer_model=os.environ.get("ORCH_REVIEWER_MODEL", "gpt-5.6-terra"),
+            currency=os.environ.get("ORCH_CURRENCY", "USD").strip().upper() or "USD",
             budget_global_daily_eur=_env_float("ORCH_BUDGET_GLOBAL_DAILY_EUR", 5.0),
             budget_project_daily_eur=_env_float("ORCH_BUDGET_PROJECT_DAILY_EUR", 5.0),
             budget_task_eur=_env_float("ORCH_BUDGET_TASK_EUR", 2.0),
@@ -87,6 +97,10 @@ class Settings:
 
     def ensure_dirs(self) -> None:
         self.projects_dir.mkdir(parents=True, exist_ok=True)
+
+    @property
+    def symbol(self) -> str:
+        return {"USD": "$", "EUR": "€", "GBP": "£"}.get(self.currency, self.currency + " ")
 
     @property
     def stop_file(self) -> Path:
