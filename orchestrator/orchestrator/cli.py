@@ -353,8 +353,30 @@ def cmd_serve(args) -> int:
     def binnenkomend() -> int:
         return opdrachten() + antwoorden()
 
+    import os
+    import socket
+
+    from .models import now as _now
+
+    gestart = _now()
+    teller = {"rondes": 0, "fout": None}
+
+    def klop(ronde) -> None:
+        teller["rondes"] += 1
+        werk = None
+        if ronde.taken or ronde.antwoorden or ronde.hersteld:
+            werk = (f"{ronde.taken} taak/taken, {ronde.antwoorden} antwoord(en),"
+                    f" {ronde.hersteld} hersteld")
+        db.heartbeat(gestart_op=gestart, rondes=teller["rondes"], werk=werk,
+                     fout=teller["fout"], pid=os.getpid(), host=socket.gethostname())
+        teller["fout"] = None
+
+    def gemeld(tekst: str) -> None:
+        teller["fout"] = tekst
+        print(f"! {tekst}")
+
     lus = Serve(recover_fn=herstel, poll_fn=binnenkomend, work_fn=werk,
-                interval=args.interval, on_event=lambda t: print(f"! {t}"))
+                interval=args.interval, on_event=gemeld, na_ronde=klop)
     if settings.paused():
         print(f"noodstop actief ({settings.stop_file}); er wordt niets gedaan")
         return 1
@@ -380,6 +402,43 @@ def cmd_intake(args) -> int:
         for actie in intake(scope=db.scope(slug), project=project, client=GitHubClient()):
             print(f"{slug}: {actie}")
     return 0
+
+
+def cmd_status(args) -> int:
+    """Draait de dienst, en wat deed ze het laatst?
+
+    Zonder dit is er geen manier om te bewijzen dat de orkestrator leeft; een
+    proces dat stil is, is niet te onderscheiden van een proces dat weg is.
+    """
+    from datetime import datetime, timezone
+
+    settings = _settings()
+    db = _db(settings)
+    rij = db.laatste_heartbeat()
+    if rij is None:
+        print("de dienst heeft nog nooit gedraaid (geen levensteken)")
+        return 1
+
+    laatste = datetime.fromisoformat(rij["laatste_ronde"])
+    stil = (datetime.now(timezone.utc) - laatste).total_seconds()
+    gezond = stil < args.max_stilte
+
+    print(f"status         {'DRAAIT' if gezond else 'GEEN LEVENSTEKEN'}")
+    print(f"laatste ronde  {rij['laatste_ronde']}  ({int(stil)}s geleden)")
+    print(f"gestart        {rij['gestart_op']}")
+    print(f"rondes         {rij['rondes']}")
+    print(f"host / pid     {rij['host']} / {rij['pid']}")
+    print(f"laatste werk   {rij['laatste_werk'] or '(nog niets)'}")
+    if rij["laatste_fout"]:
+        print(f"laatste fout   {rij['laatste_fout']}")
+    print(f"noodstop       {'AAN' if settings.paused() else 'uit'}")
+
+    for slug in projects_mod.list_projects(settings):
+        scope = db.scope(slug)
+        wachtend = len(scope.tasks(status="queued"))
+        geblokkeerd = len([t for t in scope.tasks() if t["status"] == "blocked"])
+        print(f"  {slug:<22} {wachtend} in de rij, {geblokkeerd} geblokkeerd")
+    return 0 if gezond else 1
 
 
 def cmd_efficiency(args) -> int:
@@ -837,6 +896,11 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--rounds", type=int, default=None,
                        help="stop na dit aantal rondes (standaard: eeuwig)")
     serve.set_defaults(func=cmd_serve)
+
+    st = sub.add_parser("status", help="draait de dienst? (exit 0 = ja)")
+    st.add_argument("--max-stilte", type=int, default=600,
+                    help="seconden zonder ronde waarna de dienst als dood geldt")
+    st.set_defaults(func=cmd_status)
 
     eff = sub.add_parser("efficiency", help="nuttige tegenover verspilde AI-kosten")
     eff.add_argument("project", nargs="?")

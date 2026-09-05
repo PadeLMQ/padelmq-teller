@@ -1,0 +1,11 @@
+[Unit]
+Description=Levensteken van de orkestrator controleren
+
+[Service]
+Type=oneshot
+User=orchestrator
+WorkingDirectory=/opt/orchestrator/repo/orchestrator
+EnvironmentFile=/etc/orchestrator/env
+# Exit 1 betekent: geen levensteken. systemd markeert deze unit dan als failed,
+# en dat is zichtbaar in 'systemctl --failed' zonder dat er iets extra's draait.
+ExecStart=/usr/bin/python3 -m orchestrator.cli status --max-stilte 900

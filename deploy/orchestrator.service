@@ -1,0 +1,45 @@
+[Unit]
+Description=PadeLMQ AI Development Orchestrator
+Documentation=https://github.com/PadeLMQ/padelmq-teller
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=orchestrator
+Group=orchestrator
+WorkingDirectory=/opt/orchestrator/repo/orchestrator
+
+# Secrets staan in een bestand dat alleen root en de dienst mogen lezen.
+# Nooit in de unit zelf, nooit in de repository, nooit in een logregel.
+EnvironmentFile=/etc/orchestrator/env
+
+ExecStart=/usr/bin/python3 -m orchestrator.cli serve --interval 120
+
+# Herstart altijd, ook na een nette exit: een orkestrator die stopt omdat er
+# even niets te doen was, moet gewoon weer opkomen.
+Restart=always
+RestartSec=15
+# Blijft hij binnen 10 minuten vijf keer omvallen, dan is er iets structureel
+# mis en helpt doorstarten niet meer. Dan liever stil blijven staan, zodat
+# 'orchestrator status' dat toont in plaats van een oneindige herstartlus.
+StartLimitIntervalSec=600
+StartLimitBurst=5
+
+# Het proces mag alleen bij wat het nodig heeft.
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/orchestrator /opt/orchestrator/repo /opt/orchestrator/werk
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+LockPersonality=true
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=orchestrator
+
+[Install]
+WantedBy=multi-user.target

@@ -33,13 +33,16 @@ class Serve:
     dit kan doorlopen zonder te wachten en zonder te betalen."""
 
     def __init__(self, *, recover_fn, poll_fn, work_fn, sleep_fn=time.sleep,
-                 interval: int = 60, on_event=None):
+                 interval: int = 60, on_event=None, na_ronde=None):
         self.recover_fn = recover_fn
         self.poll_fn = poll_fn
         self.work_fn = work_fn
         self.sleep_fn = sleep_fn
         self.interval = interval
         self.on_event = on_event or (lambda tekst: None)
+        # Na elke ronde, ook een stille: een levensteken hoort juist te kloppen
+        # wanneer er niets te doen is, anders lijkt stilte op een dode dienst.
+        self.na_ronde = na_ronde or (lambda ronde: None)
 
     def _veilig(self, naam: str, fn, ronde: Ronde) -> int:
         """Een fout in één onderdeel mag de lus niet stoppen.
@@ -59,6 +62,10 @@ class Serve:
         r.hersteld = self._veilig("herstel", self.recover_fn, r)
         r.antwoorden = self._veilig("antwoorden ophalen", self.poll_fn, r)
         r.taken = self._veilig("werk afwerken", self.work_fn, r)
+        try:
+            self.na_ronde(r)
+        except Exception as exc:  # noqa: BLE001 - een levensteken mag niets slopen
+            self.on_event(f"levensteken mislukte: {type(exc).__name__}: {exc}")
         return r
 
     def run(self, *, rondes: int | None = None) -> list[Ronde]:

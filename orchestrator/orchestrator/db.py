@@ -153,6 +153,19 @@ CREATE TABLE IF NOT EXISTS answer_turns (
 );
 CREATE INDEX IF NOT EXISTS ix_turns_session ON answer_turns(session_id, id);
 
+-- Levensteken van de doorlopende lus. Eén rij, steeds overschreven: genoeg om
+-- te bewijzen dat de dienst draait en wanneer ze voor het laatst iets deed.
+CREATE TABLE IF NOT EXISTS heartbeat (
+    id          INTEGER PRIMARY KEY CHECK (id = 1),
+    gestart_op  TEXT NOT NULL,
+    laatste_ronde TEXT NOT NULL,
+    rondes      INTEGER NOT NULL DEFAULT 0,
+    laatste_werk TEXT,
+    laatste_fout TEXT,
+    pid         INTEGER,
+    host        TEXT
+);
+
 CREATE TABLE IF NOT EXISTS signatures (
     id          INTEGER PRIMARY KEY,
     project_id  INTEGER NOT NULL REFERENCES projects(id),
@@ -220,6 +233,23 @@ class Database:
         for kolom in ("last_review_feedback", "last_review_signature"):
             if kolom not in bestaand:
                 self.conn.execute(f"ALTER TABLE tasks ADD COLUMN {kolom} TEXT")
+
+    def heartbeat(self, *, gestart_op: str, rondes: int, werk: str | None = None,
+                  fout: str | None = None, pid: int | None = None,
+                  host: str | None = None) -> None:
+        """Schrijft het levensteken weg. Projectloos: dit gaat over de dienst."""
+        self.conn.execute(
+            "INSERT INTO heartbeat (id, gestart_op, laatste_ronde, rondes, laatste_werk,"
+            " laatste_fout, pid, host) VALUES (1,?,?,?,?,?,?,?)"
+            " ON CONFLICT(id) DO UPDATE SET gestart_op=excluded.gestart_op,"
+            " laatste_ronde=excluded.laatste_ronde,"
+            " rondes=excluded.rondes, laatste_werk=COALESCE(excluded.laatste_werk, heartbeat.laatste_werk),"
+            " laatste_fout=excluded.laatste_fout, pid=excluded.pid, host=excluded.host",
+            (gestart_op, now(), rondes, werk, fout, pid, host),
+        )
+
+    def laatste_heartbeat(self):
+        return self.conn.execute("SELECT * FROM heartbeat WHERE id = 1").fetchone()
 
     def close(self) -> None:
         self.conn.close()
