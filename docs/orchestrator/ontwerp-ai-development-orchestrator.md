@@ -1,514 +1,483 @@
 # Universele AI Development Orchestrator — haalbaarheidsanalyse & technisch ontwerp
 
-**Status:** ontwerp ter beoordeling. Nog niets gebouwd.
+**Versie:** 2 — bijgewerkt na jouw besluiten over B1 (API-verbruik) en B6 (projecten),
+en na je correctie op de rol van de GPT-reviewer.
+**Status:** ontwerp ter beoordeling. Nog niets geïmplementeerd.
 **Datum:** 5 september 2026
 **Opdrachtgever:** Mathias (PadeLMQ)
-**Scope:** één orkestrator die meerdere ontwikkelprojecten aanstuurt; doel is snellere
-oplevering van díe projecten, niet de orkestrator zelf.
+
+> **Wat er in versie 2 veranderd is**
+> 1. B1 en B6 zijn beslist en verwerkt (§1, §5, §8).
+> 2. De GPT-reviewer zit **wel** in V1. Mijn eerdere bezwaar ging over een andere rol
+>    dan die jij bedoelde; ik trek dat deel in en leg uit waarom (§4).
+> 3. Nieuwe kern van het ontwerp: de **projectkennisbasis** — de businesscontext hoort
+>    niet in een chat maar in versiebeheerde bestanden (§5).
+> 4. Nieuwe beslislaag **AUTO / PARK / BLOCK** met een citatieplicht (§6). Dit vervangt
+>    de "doorwerken op een standaardaanname" uit versie 1, die in strijd was met
+>    "nooit gokken".
+> 5. Verplichte tegenspraak van beide modellen, structureel afgedwongen (§7).
+> 6. Volledige kostenbewaking vanaf V1 (§9).
+> 7. Faseplan herzien: V1 is groter maar strak begrensd, met een expliciete afkaplijn (§11).
 
 ---
 
-## 0. Samenvatting en oordeel
+## 1. Wat er nu vaststaat
 
-**Kan het? Grotendeels ja — maar niet zoals je het beschrijft.**
-
-| Onderdeel van je voorstel | Haalbaar? | Toelichting |
+| # | Beslissing | Uitkomst |
 |---|---|---|
-| Claude automatisch laten werken, zonder chatvenster | **Ja, officieel** | Claude Agent SDK / `claude -p`. Sessies per project, hervatbaar, hooks, rechtenmodel. |
-| Output automatisch naar analyse sturen | **Ja** | Gewoon een functieaanroep in de lus. |
-| "GPT" die de volgende prompt maakt | **Ja via de OpenAI API** | Maar **niet** via je ChatGPT-chats. Zie §2.2. |
-| Je bestaande ChatGPT-gesprekken hergebruiken | **Nee** | Er is geen officiële API voor de ChatGPT-app. Alleen een handmatige export als eenmalige startvulling. |
-| Onbeperkt projecten, elk eigen context/geschiedenis | **Ja** | Per project een map, een SQLite-record en een eigen Claude-sessie-id. |
-| Doorlopen tot menselijke input echt nodig is | **Ja, met grenzen** | Werkt alleen betrouwbaar met harde stopcondities: budget, iteratielimiet, geen-vooruitgang-detectie. |
-| Open vragen parkeren en gebundeld voorleggen | **Ja** | Dit is het waardevolste stuk van je voorstel. Zie §4.5. |
-| "Vrijwel geen handmatig kopiëren en plakken meer" | **Ja** | Realistisch: het plakken verdwijnt volledig; jouw beslismomenten niet. |
-
-**Mijn belangrijkste tegenspraak:** je beschrijft een lus waarin het oordeel van een tweede
-taalmodel het stuursignaal is. Dat is het zwakste signaal dat beschikbaar is. In
-softwareontwikkeling bestaat er hard bewijs — tests, typecheck, linter, build, een
-draaiende app — en dát hoort de motor van de lus te zijn. Een tweede model heeft wél
-waarde (andere blinde vlekken), maar als **poortwachter**, niet als promptschrijver.
-Uitgewerkt in §3. Als je het na het lezen anders ziet, bouw ik jouw variant — maar dan
-met open ogen.
-
-**Tweede tegenspraak:** de eerste versie hoeft GPT helemaal niet te bevatten. Ongeveer
-80% van de winst zit in "Claude blijft doorwerken tot de tests groen zijn en vraagt me
-niets tussendoor". Dat is fase 1 en kost een fractie van het geheel. Bouw dat eerst,
-meet het, en voeg de tweede leverancier pas toe als de meting het rechtvaardigt.
+| **B1** | API-verbruik | **Akkoord.** Officiële API's met verbruiksfacturering. Voorwaarde: volledige kostenbewaking vanaf V1 — per project, per model, per taak, per dag, met instelbare limieten én waarschuwingen. Geen onbegrensde kosten. Uitgewerkt in §9. |
+| **B6** | Projecten | **Geen vaste lijst, geen vast aantal.** Een project toevoegen is één commando. Elk project krijgt volledig gescheiden context, geschiedenis, configuratie, Claude-sessie en reviewer-context. Vermenging is architectonisch uitgesloten, niet alleen afgesproken. Uitgewerkt in §5. |
+| **Reviewer** | Rol in V1 | **Blijft in V1.** Twee rollen: *beantwoorder* (vóór Claude) en *beoordelaar* (na de harde verificatie). Zie §4. |
+| **Beslisvolgorde** | Hybride | Harde verificatie → reviewer/context → Claude → harde verificatie → volgende stap. Een model kan een harde test nooit overrulen. Zie §4.3. |
+| **Grondregel** | Nooit gokken | Drie uitkomsten per vraag: AUTO, PARK, BLOCK. Een ontbrekende businessregel wordt nooit verzonnen om de lus draaiende te houden. Zie §6. |
 
 ---
 
-## 1. Waar de tijd nu écht heen gaat
+## 2. Haalbaarheid — samenvatting
 
-Je huidige lus: Claude antwoordt → jij plakt in GPT → GPT analyseert → jij plakt terug.
-De kosten daarvan zijn niet alleen de seconden van het plakken.
-
-| Verliespost | Wat het je kost | Wordt opgelost door |
+| Onderdeel | Haalbaar | Toelichting |
 |---|---|---|
-| Kopiëren/plakken | seconden per stap, tientallen keren per dag | de orkestrator (volledig weg) |
-| **Jij bent de planner** | de lus staat stil zodra jij iets anders doet | de orkestrator werkt door terwijl je slaapt — **grootste winst** |
-| Contextwissels | 20 onderbrekingen per dag, elk ~10-15 min herstel | vraagbundeling (§4.5) |
-| Verkeerd werk dat pas laat opvalt | hele iteraties weggegooid | harde verificatiepoort vóór de reviewstap (§3) |
-| Wachten op een lange Claude-run | dode tijd | parallelle projecten (§4.6) |
-
-De echte winst is dus **doorvoer**, niet snelheid per stap. Eén project gaat niet
-dramatisch sneller; vier projecten tegelijk vorderen wel terwijl jij er één bekijkt.
-
-Dit is meetbaar en de orkestrator meet het zelf mee vanaf dag één — zie §9. Ik geef
-bewust geen "3× sneller"-belofte; dat zou giswerk zijn.
+| Claude aansturen zonder chatvenster | **Ja, officieel** | Claude Agent SDK / `claude -p`: hervatbare sessies per project, JSON-uitvoer, rechtenmodel, kosten per run. |
+| Reviewer met eigen geheugen per project | **Ja, via de OpenAI API** | Responses API met `previous_response_id`-ketening per project, plus structured outputs. |
+| Je bestaande ChatGPT-chats hergebruiken | **Nee** | Geen officiële API voor de ChatGPT-app; geautomatiseerde toegang buiten de API valt onder het verbod in de gebruiksvoorwaarden. **Dit is nu het belangrijkste openstaande punt** — zie §5.2 en beslissing N1. |
+| Onbeperkt projecten, strikt gescheiden | **Ja** | §5.1. |
+| Doorlopen tot menselijke input nodig is | **Ja, met grenzen** | §6 en §10. |
+| Vragen parkeren en gebundeld voorleggen | **Ja** | §6.4. |
+| Geen handmatig knip- en plakwerk meer | **Ja** | Dat is precies wat V1 wegneemt. |
 
 ---
 
-## 2. Haalbaarheid per koppeling
+## 3. Waar de tijd nu heen gaat
 
-### 2.1 Claude-kant — volledig officieel ondersteund
+| Verliespost | Wat het kost | Opgelost door |
+|---|---|---|
+| Knippen en plakken tussen twee chats | Seconden per stap, tientallen keren per dag | De orkestrator — verdwijnt volledig |
+| **Jij bent de planner** | De lus staat stil zodra jij iets anders doet | Doorwerken zonder jou — grootste winst |
+| Claude stelt een functionele/UX/business-vraag | Jij moet naar de juiste ChatGPT-chat, context ophalen, antwoord terugbrengen | De **beantwoorderrol** van de reviewer (§4.2) — dit is jouw eigenlijke bottleneck |
+| Contextwissels | ~20 onderbrekingen per dag | Vraagbundeling (§6.4) |
+| Verkeerd werk dat pas laat opvalt | Hele iteraties weggegooid | Harde verificatiepoort (§4.3) |
 
-De Claude Agent SDK is Claude Code als bibliotheek, in Python en TypeScript. Alles wat de
-lus nodig heeft, zit erin:
+---
 
-| Nodig | Beschikbaar |
+## 4. De rol van de reviewer — herziening van mijn eerdere bezwaar
+
+### 4.1 Wat ik terugneem
+
+In versie 1 stelde ik dat de tweede-modelstap uit V1 kon. Dat bezwaar richtte zich op de
+rol die ik erin las: *een model dat het antwoord van een ander model leest en daar een
+mooiere prompt van maakt*. Die rol voegt weinig toe en verbergt fouten.
+
+De rol die jij beschrijft is een andere: **de bewaarplaats van eerdere beslissingen,
+doelstellingen en businessregels, die de functionele en UX-vragen van Claude kan
+beantwoorden.** Dat is geen tweede mening — dat is ontbrekende informatie aanleveren.
+Zonder die stap moet jij zelf de brug slaan, en precies die brug is je bottleneck.
+Mijn bezwaar was op die rol niet van toepassing. De reviewer blijft in V1.
+
+Wat ik **niet** terugneem, en wat jij ook onderschrijft: waar hard bewijs bestaat, is hard
+bewijs leidend. Een model kan een falende test niet wegredeneren.
+
+### 4.2 Twee verschillende rollen, twee verschillende momenten
+
+De reviewer verschijnt twee keer in de lus, met verschillende opdrachten en
+verschillende uitvoerschema's:
+
+| | **Beantwoorder** (vóór Claude) | **Beoordelaar** (na groene verificatie) |
+|---|---|---|
+| Invoer | Openstaande vragen van Claude, de taakspecificatie, de projectkennisbasis | De diff, de testuitslag, de acceptatiecriteria, de kennisbasis |
+| Opdracht | Beantwoord wat aantoonbaar afleidbaar is; markeer de rest | Beoordeel of dit de taak echt afmaakt en of er iets beters bestaat |
+| Uitvoer | Antwoord + **verplichte bronvermelding** + AUTO/PARK/BLOCK | `pass` / `revise` / `escalate` + bevindingen + betere alternatieven |
+| Mag nooit | Een businessregel verzinnen | Een harde testuitslag tegenspreken |
+
+### 4.3 De lus
+
+```
+  ┌── 0. BASELINE ────────────────────────────────────────────────────┐
+  │   Draai de projectchecks vóór er iets wijzigt.                    │
+  │   Waarom eerst: een repo die al rood staat, mag niet aan Claude   │
+  │   worden toegeschreven. Jouw volgorde klopt hier.                 │
+  └──────────────────────────┬────────────────────────────────────────┘
+                             ▼
+  ┌── 1. CONTEXT / BEANTWOORDEN — reviewer ───────────────────────────┐
+  │   Openstaande vragen tegen de kennisbasis.                        │
+  │   → AUTO: antwoord met bron, gaat de prompt in                    │
+  │   → PARK: vraag geparkeerd, déze taak stopt, andere taken lopen   │
+  │   → BLOCK: taak stopt, jij krijgt onmiddellijk bericht            │
+  └──────────────────────────┬────────────────────────────────────────┘
+                             ▼
+  ┌── 2. UITVOEREN — Claude (Agent SDK) ──────────────────────────────┐
+  │   Met de beantwoorde vragen in de prompt. Moet zelf nieuwe        │
+  │   onzekerheden melden i.p.v. invullen.                            │
+  └──────────────────────────┬────────────────────────────────────────┘
+                             ▼
+  ┌── 3. VERIFIËREN — hard bewijs, geen model ────────────────────────┐
+  │   tests · typecheck · lint · build · databasechecks · smoke-run   │
+  │   rood → terug naar 2 met de echte fout (max N pogingen)          │
+  └──────────────────────────┬─── groen ──────────────────────────────┘
+                             ▼
+  ┌── 4. BEOORDELEN — reviewer ───────────────────────────────────────┐
+  │   pass → commit    revise → terug naar 2    escalate → BLOCK      │
+  │   Verdict wordt gevalideerd tegen de harde feiten uit stap 3.     │
+  └───────────────────────────────────────────────────────────────────┘
+```
+
+**Hoe "een model overrulet nooit een test" wordt afgedwongen**, en niet slechts
+afgesproken:
+
+1. Rood bereikt de beoordelaar helemaal niet — stap 4 draait alleen op groen.
+2. De orkestrator valideert het verdict tegen de machinaal vastgestelde feiten. Zegt de
+   beoordelaar `pass` terwijl een acceptatiecriterium meetbaar niet gehaald is, dan wordt
+   het verdict verworpen en geteld als reviewerfout in de kwaliteitsmeting.
+3. De beoordelaar krijgt geen enkele mogelijkheid om een verificatiecommando te wijzigen,
+   over te slaan of als "flaky" te markeren. Die knop bestaat niet.
+
+---
+
+## 5. Projecten: onbeperkt, en strikt gescheiden
+
+### 5.1 Een project toevoegen
+
+```
+orchestrator project add <slug> --repo <pad-of-url>
+```
+
+Dit maakt aan:
+
+```
+projects/<slug>/
+  project.yaml          repo, branch, verificatiecommando's, budgetten,
+                        autonomieniveau, datapolicy, notificatiekanaal
+  kennis/
+    doelen.md           wat dit project moet bereiken
+    businessregels.md   regels die het gedrag bepalen (prijzen, btw, limieten)
+    beslissingen.md     append-only logboek: D-001, D-002, … met datum en reden
+    woordenlijst.md     projecttaal, zodat beide modellen hetzelfde bedoelen
+  state/
+    tasks.db            of één gedeelde SQLite met een verplichte project_id
+    sessions.json       Claude-sessie-id's en reviewer-response-id's
+```
+
+**Isolatie is structureel, niet procedureel.** Vier onafhankelijke sloten:
+
+| Slot | Werking |
 |---|---|
-| Programmatisch een opdracht draaien | `query(prompt, options)` (Python/TS), of `claude -p` als subproces |
-| Machineleesbare uitvoer | `--output-format json` / `stream-json`; met `--json-schema` zelfs schema-gedwongen |
-| Geschiedenis per project/taak | Sessies op schijf; `resume=<session_id>`, `fork_session` voor varianten |
-| Rechten zonder mens aan de knoppen | `--permission-mode` (`auto`, `dontAsk`, `acceptEdits`) + `--permission-prompts none` |
-| Ingrijpen op vaste momenten | Hooks (o.a. `SessionStart`, `PermissionRequest`, `SessionEnd`) |
-| Kostenbewaking per run | `total_cost_usd` in het resultaatbericht; `error_max_budget_usd` als stopreden |
-| Reproduceerbaarheid in scripts | `--bare` slaat hooks/plugins/MCP van de host over |
+| Eigen werkmap | Claude draait met `cwd` in de projectmap; alleen die map en expliciet toegevoegde mappen zijn leesbaar |
+| Eigen sessies | Eén Claude-sessie-id en één reviewer-gespreksketen per project; er bestaat nooit een gedeelde keten |
+| Verplichte sleutel | Elke database-query loopt via een laag die `project_id` verplicht meegeeft; een query zonder project is een programmeerfout die de test vangt |
+| Contextopbouw | De prompt wordt opgebouwd uit uitsluitend bestanden onder `projects/<slug>/`; er is geen codepad dat twee projectmappen tegelijk inleest |
 
-Twee praktische aandachtspunten:
+Vermenging kan dus niet "ongemerkt" gebeuren, omdat er geen mechanisme is dat twee
+projecten in één context brengt.
 
-1. **Sessiebestanden zijn machinegebonden** (`~/.claude/projects/<map>/<id>.jsonl`).
-   Draait de orkestrator altijd op dezelfde machine, dan is dat geen probleem. Wil je later
-   naar een VPS of CI, dan is er een `SessionStore`-adapter, of — robuuster — je vertrouwt
-   niet op sessie-hervatting maar bouwt de context elke run opnieuw op uit je eigen
-   opslag. Mijn advies: **hervat sessies waar het kan, maar maak de orkestrator er niet
-   afhankelijk van.** De taakstatus in SQLite is de waarheid, de Claude-sessie is
-   versnelling.
-2. **Authenticatie/kosten.** `claude -p` gebruikt je bestaande login; `--bare` (de
-   aanbevolen modus voor scripts) leest géén OAuth-credentials en vereist een
-   `ANTHROPIC_API_KEY` met verbruiksfacturering. Anthropic staat derden bovendien niet toe
-   claude.ai-login of -limieten aan hun producten aan te bieden. Voor eigen, persoonlijk
-   gebruik op je eigen machine is `-p` zonder `--bare` technisch mogelijk, maar dit is een
-   **beslissing met kosten- en voorwaardengevolgen** die jij moet nemen, niet ik. Zie
-   beslissing B1 in §8.
+### 5.2 De kennisbasis — de belangrijkste toevoeging in versie 2
 
-### 2.2 ChatGPT-kant — hier zit het gat in je voorstel
+Je beschrijft dat ChatGPT "veel van onze eerdere beslissingen, doelstellingen en
+businessregels kent". Dat is waar, en het is precies het probleem: **die kennis zit
+opgesloten in chats die we niet via een API kunnen lezen.** Een reviewer die we via de
+API aanspreken, begint met nul kennis van jouw projecten. Dan beantwoordt hij niets, of
+erger: hij verzint iets.
 
-**Wat niet kan:** er bestaat geen officiële API om berichten in je ChatGPT-chats te
-plaatsen of eruit te lezen. De gebruiksvoorwaarden van OpenAI verbieden geautomatiseerde
-of programmatische toegang tot de dienst buiten de API om; browserautomatisering van
-chatgpt.com valt daaronder. Los van de voorwaarden is het ook technisch fragiel
-(loginmuren, botdetectie, UI-wijzigingen) — precies het soort koppeling dat op een
-donderdagavond stilvalt.
+Daarom verplaatst dit ontwerp de kennis van de chat naar **bestanden die de orkestrator
+bezit**:
 
-**Wat wel kan:** de **OpenAI API** (Responses API). Dat is de gesanctioneerde route en
-functioneel beter voor dit doel:
+- Beide modellen lezen dezelfde bron, dus ze kunnen niet uiteenlopen.
+- Elk AUTO-antwoord kan naar een regel verwijzen: *"btw-behandeling volgt D-014"*.
+  Zonder verwijzing geen AUTO (§6.2).
+- Jij kunt de regels lezen en corrigeren; je hoeft geen chat te doorzoeken.
+- Het is leveranciersonafhankelijk. Wisselt de reviewer ooit van model of leverancier,
+  dan blijft de kennis staan.
+- Elk antwoord dat je op een geparkeerde vraag geeft, wordt automatisch als nieuwe
+  beslissing toegevoegd. De kennisbasis groeit dus vanzelf naarmate je hem gebruikt.
 
-- `previous_response_id`-ketening of de Conversations-API geeft server-side
-  gespreksgeheugen per project — het equivalent van "een aparte GPT-chat per project".
-- Structured outputs dwingen af dat de reviewer JSON teruggeeft in *jouw* schema, in
-  plaats van proza dat je moet interpreteren.
-- Responses worden standaard 30 dagen bewaard (`store`); je houdt sowieso je eigen kopie
-  in de database, dus dat is alleen gemak.
-
-**De consequenties, eerlijk benoemd:**
-
-| Gevolg | Betekenis |
-|---|---|
-| Je huidige ChatGPT-gesprekken gaan niet mee | Alleen via handmatige data-export als eenmalige startvulling per project. |
-| Andere factuur | De API is verbruiksgebaseerd en staat los van je ChatGPT-abonnement. Je betaalt tweemaal zolang je beide gebruikt. |
-| Ander gedrag | Het API-model is niet identiek aan wat de ChatGPT-app doet (die heeft eigen systeeminstructies en tools). Verwacht een andere toon; het oordeel is vergelijkbaar. |
-| Je code gaat naar een tweede leverancier | Zie §7, risico R4. Voor PadeLMQ relevant: er zitten Shopify-credentials in de omgeving van je projecten. |
-
-### 2.3 Verdict
-
-Beide kanten zijn koppelbaar via officiële, ondersteunde interfaces. Er is **geen enkele
-reden om te scrapen of te browserautomatiseren**, en ik zal dat ook niet voorstellen.
-De prijs is dat je "GPT-chat per project" migreert naar "reviewer-API met eigen geheugen
-per project" — dezelfde rol, andere plek.
+**Hoe hij gevuld wordt bij de start** is een openstaande beslissing — zie N1 in §12.
 
 ---
 
-## 3. Tegenspraak: verplaats het gezag van het tweede model naar het bewijs
+## 6. Nooit gokken: AUTO / PARK / BLOCK
 
-Je voorstel: Claude produceert → GPT beoordeelt en schrijft de volgende prompt → Claude
-voert uit. In die lus is de **mening van een taalmodel** het enige stuursignaal.
+### 6.1 De drie uitkomsten
 
-Waarom dat te zwak is als motor:
+| Uitkomst | Wanneer | Wat er gebeurt |
+|---|---|---|
+| **AUTO** | Het antwoord is aantoonbaar afleidbaar uit een controleerbare bron | Antwoord gaat de prompt in, met bronvermelding in het logboek. Werk gaat door. |
+| **PARK** | Geen bron, maar er kan veilig aan ander werk verder gegaan worden | De vraag wordt geparkeerd, **de afhankelijke taak stopt**, andere taken lopen door. Jij ziet hem in de bundel. |
+| **BLOCK** | Een beslissing is noodzakelijk, of fout implementeren is te riskant | De taak stopt en jij krijgt onmiddellijk bericht. |
 
-1. **Twee modellen kunnen samen zelfverzekerd fout zijn.** Als Claude een test breekt en
-   GPT ziet alleen de tekst van het antwoord, wordt de fout doorgegeven en versterkt.
-2. **Het is duur per eenheid informatie.** Een testrun kost seconden en centen en geeft
-   een binair, onbetwistbaar antwoord. Een reviewronde kost tienduizenden tokens en geeft
-   een mening.
-3. **Het maakt eindeloos ronddraaien mogelijk.** Zonder objectief eindpunt kan de lus
-   oneindig "verbeteren" zonder ooit klaar te zijn. Dit is de belangrijkste kostenrisico.
-4. **Claude Code doet dit intern al.** De agentlus draait zelf al tests en herstelt zelf.
-   Een externe promptschrijver dupliceert dat gedeeltelijk.
+Twijfelregels, zoals je ze gaf:
 
-**Wat ik in plaats daarvan voorstel — dezelfde automatisering, ander gezag:**
+- Twijfel tussen AUTO en PARK → **PARK**.
+- Twijfel tussen PARK en BLOCK → BLOCK als er in dit project geen veilig, onafhankelijk
+  werk overblijft; anders PARK.
 
-```
-                    ┌──────────────────────────────────────────────┐
-                    │  Taak met acceptatiecriteria (uit backlog)   │
-                    └───────────────────┬──────────────────────────┘
-                                        ▼
-                            ┌───────────────────────┐
-                            │  UITVOEREN — Claude   │  Agent SDK, sessie per taak
-                            └───────────┬───────────┘
-                                        ▼
-                     ┌─────────────────────────────────────┐
-                     │  VERIFIËREN — hard bewijs           │  tests · typecheck · lint
-                     │  (deterministisch, geen model)      │  · build · smoke-run
-                     └──────────┬──────────────┬───────────┘
-                          rood  │              │ groen
-                                ▼              ▼
-                   terug naar Claude   ┌────────────────────────┐
-                   met de echte fout   │ BEOORDELEN — reviewer  │ GPT, JSON-verdict
-                   (geen model nodig)  │ (2e leverancier)       │
-                                       └───────────┬────────────┘
-                                                   ▼
-                              pass ──► KLAAR      revise ──► terug naar Claude
-                                                  escalate ──► vraag parkeren
-```
+> **Correctie op versie 1.** Versie 1 liet de lus doorwerken op een "standaardaanname"
+> terwijl een vraag geparkeerd stond. Dat is in strijd met "nooit gokken" en vervalt.
+> Een voorgestelde standaardkeuze wordt nog steeds getoond in de bundel — als **voorstel
+> aan jou**, nooit als iets dat het systeem zelf toepast.
 
-De reviewer blijft dus in het ontwerp — jouw intuïtie dat een tweede model waarde
-toevoegt, klopt: het vindt dingen die tests niet vinden (verkeerde aanpak, gemiste eis,
-onnodige complexiteit, veiligheidsgat). Maar hij komt **na** het harde bewijs en hij
-levert een **gestructureerd verdict**, geen vrije prompt:
+### 6.2 De citatieplicht — waarom niet op zelfvertrouwen
 
-```json
-{
-  "verdict": "pass | revise | escalate",
-  "confidence": 0.0,
-  "findings": [{"severity": "blocker|major|minor", "file": "", "issue": "", "fix": ""}],
-  "next_instruction": "concrete opdracht voor Claude, alleen bij revise",
-  "open_questions": [{"question": "", "why_blocking": "", "options": [],
-                      "default_assumption": "", "blocking": true}],
-  "acceptance_met": ["criterium-1"], "acceptance_missing": ["criterium-3"]
-}
-```
+De voor de hand liggende implementatie is een zekerheidsscore: "beantwoord automatisch
+boven 85% zekerheid". Dat werkt niet. Een taalmodel is het meest zelfverzekerd op precies
+het punt waar het een plausibele businessregel verzint — de score correleert met
+vloeiendheid, niet met juistheid.
 
-Dit levert drie dingen op die vrije prompts niet leveren: de lus kan er programmatisch
-op beslissen, je kunt de reviewer achteraf beoordelen op zijn eigen cijfers, en
-"escalate" wordt een echte, afdwingbare uitkomst in plaats van een zin in een alinea.
+Daarom is de poort **verifieerbaarheid, niet zelfvertrouwen**:
 
-**Concreet gevolg voor jou:** het verschil tussen jouw variant en de mijne is niet minder
-automatisering. Het is dat de mijne kán stoppen met een objectief "klaar", en de jouwe
-niet.
+> AUTO is alleen toegestaan als het antwoord ten minste één bron noemt die de orkestrator
+> zelf kan terugvinden: een beslissing-ID uit `beslissingen.md`, een regel uit
+> `businessregels.md`, een bestand en regelnummer in de repo, of een testuitslag.
+> De orkestrator controleert dat de bron bestaat en de bewering dekt. Klopt de verwijzing
+> niet, dan degradeert het antwoord automatisch naar PARK.
+
+### 6.3 Categorieën die nooit AUTO mogen zijn
+
+Ongeacht bron of zekerheid, deze vragen gaan minimaal naar PARK en bij afhankelijkheid
+naar BLOCK:
+
+- geldbedragen, prijzen, kortingen, marges
+- btw- en fiscale behandeling
+- juridische of contractuele punten
+- klant- of persoonsgegevens, bewaartermijnen
+- beveiliging, toegang, rechten
+- onomkeerbare datamodel- of migratiebeslissingen
+- alles wat naar buiten zichtbaar is voor klanten
+
+### 6.4 Parkeren, bundelen en hervatten
+
+1. **Vastleggen** — vraag, waarom geblokkeerd, opties, voorgestelde keuze, de taken die
+   ervan afhangen, en het project. Gelijke vragen worden ontdubbeld.
+2. **Bundelen** — één overzicht per dag (en op verzoek) over alle projecten, gegroepeerd
+   per project, met wat er stilligt.
+3. **Antwoorden** — jouw antwoord gaat als nieuwe beslissing (`D-nnn`) de kennisbasis van
+   het juiste project in, met datum en jouw formulering.
+4. **Hervatten** — de orkestrator zoekt alle taken die op die vraag wachtten, zet ze terug
+   op QUEUED en start ze in de juiste volgorde. Raakte het antwoord ook al afgerond werk,
+   dan wordt daar automatisch een correctietaak voor geopend.
+
+### 6.5 Claude dwingen om niet in te vullen
+
+De grondregel geldt ook voor de uitvoerder, en die heeft een sterke neiging om door te
+werken. Drie afdwingbare controles:
+
+1. **Verplicht uitvoerveld.** Claude levert per stap `open_questions[]` én
+   `assumptions_made[]`. Een aanname zonder bron wordt behandeld als een vraag: de commit
+   wordt vastgehouden en de vraag gaat door de triage.
+2. **Verzonnen-waarde-detector.** De diff wordt deterministisch gescand op nieuw
+   ingevoerde harde waarden — bedragen, percentages, btw-tarieven, drempels, limieten.
+   Elke nieuwe waarde die niet terug te voeren is op de kennisbasis, de bestaande code of
+   de taakspecificatie, blokkeert de commit en wordt een vraag.
+3. **Acceptatiecriteria als contract.** Een taak zonder toetsbare acceptatiecriteria komt
+   de lus niet in. Dat dwingt af dat "klaar" objectief bestaat.
 
 ---
 
-## 4. Technisch ontwerp
+## 7. Verplichte tegenspraak
 
-### 4.1 Overzicht
+Je wilt geen bevestigingsmachine. Een instructie als "wees kritisch" is daarvoor te
+zwak — dat verdampt na twee beurten. Daarom structureel:
+
+1. **Verplicht veld.** Beide modellen leveren bij elke stap `better_alternative`:
+   voorstel, waarom het beter is, welk bewijs dat steunt, wat het kost om te wisselen, en
+   een aanbeveling (`nu doen` / `later` / `afgewogen en verworpen omdat…`). Het veld is
+   verplicht; "geen" moet expliciet ingevuld worden en telt als een bewuste uitspraak.
+2. **Een voorstel verandert nooit stilzwijgend het werk.** Een beter alternatief is per
+   definitie een beslissing, en beslissingen gaan via PARK of BLOCK naar jou. Tegenspraak
+   en "nooit gokken" botsen dus niet.
+3. **De beoordelaar krijgt de opdracht om de taak zelf te betwisten**, niet alleen de
+   uitvoering: is dit het juiste probleem, is er een eenvoudiger oplossing, maakt bestaande
+   code dit overbodig.
+4. **Meetbaar.** Het aandeel voorgestelde alternatieven dat jij overneemt, wordt geteld.
+   Blijft dat op nul, dan produceert het veld ruis en passen we de instructie aan. Ligt het
+   hoog, dan krijgt de rol meer gewicht.
+
+---
+
+## 8. Architectuur
 
 Eén Python-daemon, één repository, één SQLite-bestand. Geen microservices, geen
-berichtenbus, geen Kubernetes. Op jouw schaal (één gebruiker, handvol projecten) is
-elke extra laag pure vertraging.
+berichtenbus. Op deze schaal is elke extra laag pure vertraging.
+
+| Component | Verantwoordelijkheid |
+|---|---|
+| Projectregister | `projects/<slug>/project.yaml` + kennisbasis; toevoegen is één commando |
+| Backlog | Taken met acceptatiecriteria, status, afhankelijkheden, project_id |
+| Scheduler | Kiest de volgende taak; in V1 sequentieel, één taak tegelijk |
+| Runner | De toestandsmachine van §4.3 voor één taak |
+| ClaudeAdapter | Start/hervat een sessie, dwingt het uitvoerschema af |
+| VerifyAdapter | Draait de projectchecks, classificeert het falen |
+| ReviewAdapter | Beantwoorder- en beoordelaarsaanroepen, structured outputs |
+| TriageEngine | AUTO/PARK/BLOCK, citatiecontrole, categoriepoort |
+| KnowledgeStore | Lezen, doorzoeken en append-only bijschrijven van de kennisbasis |
+| CostGuard | Meten, begrenzen en waarschuwen (§9) |
+| GitAdapter | Worktree per run, branch `orch/<taak-id>`, commit, PR |
+| Bundler | Geparkeerde vragen groeperen, versturen, antwoorden verwerken |
+
+### Toestandsmachine
 
 ```
-┌────────────────────────────────────────────────────────────────────────┐
-│ ORCHESTRATOR (Python-daemon)                                           │
-│                                                                        │
-│  Scheduler ──► Runner (toestandsmachine per taak)                      │
-│      │              │                                                  │
-│      │              ├─► ClaudeAdapter    → Claude Agent SDK            │
-│      │              ├─► VerifyAdapter    → shell: pytest/tsc/lint/build│
-│      │              ├─► ReviewAdapter    → OpenAI Responses API        │
-│      │              └─► GitAdapter       → worktree, branch, commit, PR│
-│      │                                                                 │
-│  Budgetbewaker · Vragenparkeerplaats · Gebeurtenislogboek              │
-└───────────────┬─────────────────────────────┬──────────────────────────┘
-                │                             │
-        ┌───────▼────────┐            ┌───────▼────────┐
-        │ SQLite         │            │ Mens-interface │
-        │ projecten      │            │ · dagbundel    │
-        │ taken · runs   │            │ · dashboard    │
-        │ vragen · logs  │            │ · notificatie  │
-        └────────────────┘            └────────────────┘
-```
-
-### 4.2 Componenten
-
-| Component | Verantwoordelijkheid | Techniek |
-|---|---|---|
-| **Projectregister** | Per project: repo, branch, verificatiecommando's, budget, autonomieniveau, datapolicy | `projects/<slug>/project.yaml` |
-| **Backlog/taakwinkel** | Taken met acceptatiecriteria, status, afhankelijkheden | SQLite |
-| **Scheduler** | Kiest de volgende taak over álle projecten; respecteert gelijktijdigheidslimiet en budget | Python, prioriteit + eerlijkheid per project |
-| **Runner** | De toestandsmachine van §4.3 voor één taak | Python |
-| **ClaudeAdapter** | Start/hervat een Claude-sessie, levert gestructureerd resultaat | `claude_agent_sdk` (Python) |
-| **VerifyAdapter** | Draait de projectcommando's, vangt uitvoer, classificeert falen | subprocess |
-| **ReviewAdapter** | Stuurt diff + testuitslag + criteria naar de reviewer, ontvangt JSON | `openai` (Responses API) |
-| **GitAdapter** | Worktree per run, branch `orch/<taak-id>`, commit, optioneel PR | `git`, GitHub MCP/API |
-| **Budgetbewaker** | Harde kap per run, per taak, per project, per dag | SQLite-teller vóór elke aanroep |
-| **Vragenparkeerplaats** | Verzamelt, ontdubbelt en bundelt open vragen | SQLite + bundelgenerator |
-| **Interface** | Dashboard + dagbundel + notificatie | zie §4.7 |
-
-### 4.3 De toestandsmachine
-
-```
-QUEUED → PLANNING → IMPLEMENTING → VERIFYING ─┬─(rood, poging < N)→ IMPLEMENTING
-                                              ├─(rood, poging = N)→ BLOCKED
-                                              └─(groen)───────────→ REVIEWING
+QUEUED → BASELINE → ANSWERING ─┬─(AUTO)──→ IMPLEMENTING
+                               ├─(PARK)──→ PARKED
+                               └─(BLOCK)─→ BLOCKED
+IMPLEMENTING → VERIFYING ─┬─(rood, poging < N)→ IMPLEMENTING
+                          ├─(rood, poging = N)→ BLOCKED
+                          └─(groen)───────────→ REVIEWING
 REVIEWING ─┬─(pass)────→ COMMITTING → DONE
-           ├─(revise)──→ IMPLEMENTING   (max M reviewrondes)
+           ├─(revise)──→ IMPLEMENTING   (max M rondes)
            └─(escalate)→ BLOCKED
-BLOCKED → (antwoord van mens) → QUEUED
-Elke toestand kan → FAILED (budget op, time-out, herhaalde fout)
+PARKED / BLOCKED → (jouw antwoord) → QUEUED
+elke toestand → FAILED  (budget op · time-out · herhaalde fout)
 ```
 
-**Stopcondities — niet optioneel.** Zonder deze wordt de eerste onbewaakte nacht duur:
+### Stopcondities
 
-| Conditie | Voorstel voor de standaardwaarde |
+| Conditie | Startwaarde | Waarom |
+|---|---|---|
+| Iteraties implementeren ↔ verifiëren | 5 | Voorkomt de reparatiespiraal |
+| Reviewrondes | 3 | Voorkomt oneindig "verbeteren" |
+| Budget per taak | instelbaar | §9 |
+| Wandkloktijd per run | 30 min | Vangt een vastgelopen run af |
+| **Geen-vooruitgang-detector** | 2× gelijk | Tweemaal dezelfde falende testhandtekening of een identieke diff → direct BLOCKED |
+
+---
+
+## 9. Kostenbewaking (B1)
+
+Vanaf V1, niet later.
+
+**Meten.** Elke modelaanroep schrijft een regel weg met: project, taak, run, fase, model,
+rol (uitvoerder/beantwoorder/beoordelaar), invoertokens, uitvoertokens, cachehits, kosten
+en tijdstip. Daaruit rolt elke gewenste doorsnede: per project, per model, per taak, per
+dag, per taaksoort.
+
+**Begrenzen.** Vier niveaus, allemaal instelbaar per project en globaal:
+
+| Niveau | Gedrag bij bereiken |
 |---|---|
-| Iteraties implementeren↔verifiëren | max 5 |
-| Reviewrondes | max 3 |
-| Budget per taak | in te stellen, bv. €2 |
-| Budget per project per dag | in te stellen, bv. €10 |
-| Wandkloktijd per run | 30 min |
-| **Geen-vooruitgang-detector** | tweemaal dezelfde falende testhandtekening óf een identieke diff → direct `BLOCKED`, niet nog eens proberen |
+| Per run | Run stopt, taak → FAILED met reden `budget` |
+| Per taak | Taak stopt, jij krijgt bericht |
+| Per project per dag | Project pauzeert tot middernacht, andere projecten lopen door |
+| **Globaal per dag** | **Alles pauzeert. Harde noodrem.** |
 
-De geen-vooruitgang-detector is het belangrijkste onderdeel van deze tabel. Hij vangt
-precies het scenario dat automatisering duur maakt: een model dat er zeker van is dat het
-deze keer wel lukt.
+**Waarschuwen.** Bij 50%, 80% en 100% van elk dagbudget, plus een dagelijkse
+kostenrapportage. Bij het bereiken van het globale dagplafond een directe melding.
 
-### 4.4 Datamodel (kern)
+**Vooraf remmen, niet achteraf constateren.** Vóór elke aanroep wordt de verwachte kosten
+geschat op basis van de tokentelling; past die niet meer binnen het resterende budget, dan
+wordt de aanroep niet gedaan. Je kunt dus niet over een limiet heen schieten door één dure
+run.
 
-```sql
-projects(id, slug, name, repo_path, default_branch, verify_cmds_json,
-         autonomy_level, data_policy, budget_daily_eur, active)
-tasks(id, project_id, title, spec_md, acceptance_criteria_json, status,
-      priority, depends_on_task_id, claude_session_id, reviewer_response_id,
-      cost_eur, created_at, updated_at)
-runs(id, task_id, phase, started_at, ended_at, outcome, cost_eur,
-     tokens_in, tokens_out, artifact_path)
-questions(id, project_id, task_id, question, why_blocking, options_json,
-          default_assumption, blocking, status, answer, answered_at)
-assumptions(id, task_id, question_id, assumption, made_at, revisit_needed)
-events(id, project_id, task_id, ts, kind, payload_json)
-```
+**Kostenbeperkingen in het ontwerp zelf:** promptcaching op de stabiele projectcontext en
+kennisbasis; de beoordelaar krijgt de diff plus de testuitslag, nooit de hele repo;
+verificatie draait zonder model; triage en samenvatten op het goedkoopste model.
 
-De tabel `assumptions` is bewust apart: als je later een geparkeerde vraag anders
-beantwoordt dan de aanname, moet dat zichtbaar worden — zie §4.5.
+---
 
-### 4.5 Vragen parkeren en gebundeld voorleggen
+## 10. Veiligheid
 
-Dit is het deel van je voorstel dat de meeste tijd wint, en het verdient de meeste zorg.
+1. **Nooit rechtstreeks naar `main`.** Worktree per run, branch `orch/<taak-id>`.
+2. **Commit alleen na groene verificatie.** Geen uitzonderingen.
+3. **Rechten expliciet** per project, plus `--permission-prompts none` zodat een
+   onbewaakte run niet eeuwig wacht.
+4. **Geheimen buiten de lus.** `.env`, tokens en secrets worden geredigeerd en gaan nooit
+   in een prompt. Voor PadeLMQ concreet: de Shopify Client ID en Secret staan als
+   GitHub-secret en mogen niet in diffs of logs belanden.
+5. **Promptinjectie.** Repo-inhoud, issues en webpagina's zijn *data*, nooit opdracht.
+   De lus mag zijn eigen budget-, rechten- of doelinstellingen nooit wijzigen op grond van
+   gelezen tekst, en de kennisbasis wordt uitsluitend bijgeschreven vanuit jouw antwoorden
+   — nooit door een model zelf.
+6. **Noodstop.** Eén commando pauzeert alle runs.
+7. **Alles gelogd.** Elke prompt, elk antwoord, elke bronverwijzing, elke kostenpost.
 
-**Hoe een vraag ontstaat.** Zowel Claude als de reviewer krijgen de instructie om
-onzekerheden niet weg te gissen maar te melden in een vast formaat: vraag, waarom het
-blokkeert, mogelijke opties, de aanname die ze zouden maken, en of het blokkerend is.
+---
 
-**Classificatie.**
+## 11. Faseplan
 
-| Soort | Voorbeeld | Wat de orkestrator doet |
-|---|---|---|
-| **Blokkerend, zakelijk** | "Moet de teller btw in- of exclusief tonen?" | Taak → `BLOCKED`, direct notificatie als het hele project stilligt, anders in de bundel. Werk gaat door aan andere taken. |
-| **Niet-blokkerend** | "Naam van de knop: 'Opslaan' of 'Bewaren'?" | Aanname vastleggen, doorwerken, in de bundel zetten. |
-| **Technisch, zelf te beantwoorden** | "Welke Python-versie draait dit?" | Geen vraag: Claude mag het gewoon opzoeken in de repo. |
+Je randvoorwaarde: dit mag geen wekenlang zijproject worden. Daarom is V1 strak begrensd
+en is er een expliciete afkaplijn.
 
-Het onderscheid tussen de eerste twee is de sleutel. Een verkeerde classificatie kost óf
-je aandacht (te veel blokkeren) óf een dag herwerk (te weinig). Praktische regel:
-**blokkerend = het antwoord kan het werk dat je nu zou doen weggooien.** Anders parkeren.
+### V1 — de kleinste versie die je knip-en-plakwerk echt wegneemt
 
-**Terugkoppelen van antwoorden.** Als je een geparkeerde vraag beantwoordt en het
-antwoord wijkt af van de gemaakte aanname, opent de orkestrator automatisch een
-correctietaak met verwijzing naar de commits die op de aanname gebaseerd waren. Dit is
-niet optioneel: zonder dit ontstaat er stilzwijgend werk gebouwd op verkeerde aannames.
+**Wel in V1**
 
-**De bundel.** Eén keer per dag (en op verzoek) één overzicht over álle projecten:
-per vraag de context, de opties, de voorgestelde standaardkeuze, en wat er geblokkeerd is.
-Beantwoorden in één sessie. Antwoorden gaan terug de taakcontext in en de taken keren
-terug naar `QUEUED`.
+1. `project add` met kennisbasis en configuratie (§5.1)
+2. De volledige lus van §4.3, sequentieel: één taak tegelijk
+3. Reviewer in beide rollen, met structured outputs
+4. Triage AUTO/PARK/BLOCK inclusief citatiecontrole en categoriepoort (§6)
+5. Claude-controles tegen invullen: verplichte velden, verzonnen-waarde-detector (§6.5)
+6. Geparkeerde vragen, dagbundel, antwoordverwerking, automatisch hervatten (§6.4)
+7. Volledige kostenbewaking en limieten (§9)
+8. Git-worktree, branch, commit, PR (§10)
+9. Stopcondities inclusief geen-vooruitgang-detector
+10. Volledig logboek
 
-### 4.6 Meerdere projecten
+**Bewust niet in V1** — zonder verlies van je doelen:
 
-"Onbeperkt" is technisch triviaal — een rij in een tabel. De echte beperkingen zijn
-anders en daar ontwerpen we op:
-
-| Beperking | Aanpak |
+| Uitgesteld | Waarom dit nu niets kost |
 |---|---|
-| Snelheidslimieten van beide leveranciers | Globale gelijktijdigheidslimiet (start met 2 lopende runs), exponentieel wachten bij 429 |
-| Jouw beoordelingscapaciteit | Niet meer dan X taken tegelijk in `BLOCKED`/wachtend op review, anders pauzeert de scheduler nieuwe taken |
-| Kosten | Dagbudget per project én globaal |
-| Repo-conflicten | Eén git-worktree per run; nooit twee runs tegelijk in dezelfde werkmap |
+| Parallelle uitvoering | Onbeperkt projecten werkt ook sequentieel; parallellisme is doorvoer, geen functionaliteit |
+| Webdashboard | De bundel per e-mail plus het logboek volstaan om te beoordelen |
+| Automatische taakontleding uit een roadmap | Je schrijft taken voorlopig zelf; dat is ook de plek waar acceptatiecriteria ontstaan |
+| Sessie-hervattingsoptimalisatie | Werkt, maar de database is de waarheid; puur snelheidswinst |
+| Tweede uitvoerder (Codex), A/B-vergelijking | Pas zinvol als er meetgegevens zijn |
 
-Context blijft per project gescheiden via de projectmap, de eigen Claude-sessies en een
-eigen reviewer-gespreksketen. Er lekt niets tussen projecten omdat er nooit één gedeelde
-context bestaat.
+**Afkaplijn.** Als een onderdeel de eerste volledig automatische taak niet nodig heeft,
+gaat het naar V1.1. Ik meld het je op het moment dat ik iets verplaats, met de reden.
 
-### 4.7 Mens-interface
+### V1.1 en verder — alleen op basis van meting
 
-Voorstel: **niet** een eigen webapplicatie bouwen in fase 1. Kies één bestaand kanaal:
+Parallelle projecten en scheduler · dashboard indien gemist · model per taaksoort
+afstemmen · taakontleding · tweede uitvoerder.
 
-| Optie | Voor | Tegen |
+---
+
+## 12. Openstaande beslissingen
+
+B1 en B6 zijn beslist (§1). B3 en B7 heb ik met een veilige standaard ingevuld — je kunt
+ze wijzigen, maar ze hoeven V1 niet op te houden:
+
+| # | Ingevuld met | Waarom dit veilig is |
 |---|---|---|
-| **GitHub Issues + labels** (aanbevolen) | Gratis, mobiele notificaties, geschiedenis, per project gescheiden, geen onderhoud | Wat omslachtig voor lange bundels |
-| E-mail (dagbundel) | Simpel, jij leest toch e-mail | Geen status, geen knoppen |
-| Klein lokaal dashboard | Beste overzicht | Bouw- en onderhoudskosten |
+| **B3** | Datapolicy per project, standaard: reviewer aan, `.env` en secrets altijd geredigeerd, alleen diffs en kennisbasis worden verzonden | Je hebt de reviewer in V1 gewild, dus verzenden is impliciet akkoord. De redactie is onvoorwaardelijk. Bij een project met klantgegevens zet je de schakelaar om bij het toevoegen. |
+| **B7** | Startbudget €5/dag globaal, €2/taak; alles instelbaar per project | De mechaniek is wat telt (§9); de getallen wijzig je in de configuratie. |
 
-Aanbeveling: bundels als e-mail, blokkerende vragen als GitHub-issue met label
-`orch:question`, en een dashboard pas in fase 3 als blijkt dat je het mist.
+**Wat ik nog echt van jou nodig heb — vijf punten:**
 
-### 4.8 Veiligheid en governance
-
-Een lus die zonder toezicht code schrijft en commit, verdient strengere regels dan een
-chatvenster:
-
-1. **Nooit rechtstreeks naar `main`.** Elke run werkt in een worktree op branch
-   `orch/<taak-id>`. Samenvoegen gebeurt via PR of door jou.
-2. **Commit alleen na groene verificatie.** Geen uitzonderingen, geen "tijdelijk test
-   overgeslagen".
-3. **Rechten expliciet.** `--permission-mode dontAsk` met een expliciete toegestane lijst
-   per project, plus `--permission-prompts none` zodat een onbewaakte run niet eeuwig op
-   een prompt blijft wachten.
-4. **Geheimen buiten de lus.** `.env`, tokens en `secrets` worden voor de reviewer
-   geredigeerd en gaan nooit in een prompt. Voor PadeLMQ concreet: de Shopify Client
-   ID/Secret staan als GitHub-secret en mogen niet in diffs of logs belanden.
-5. **Promptinjectie.** Een autonome lus die repo-inhoud, issue-teksten of webpagina's
-   leest, kan instructies uit die inhoud tegenkomen. Regel: inhoud uit de repo is data,
-   nooit opdracht. De reviewer krijgt expliciet die instructie mee, en de lus mag zijn
-   eigen budget-, rechten- of doelinstellingen nooit wijzigen op basis van gelezen tekst.
-6. **Noodstop.** Eén bestand of commando dat alle runs pauzeert.
-7. **Alles gelogd.** Elke prompt, elk antwoord, elke kostenpost in `events`. Zonder dat
-   kun je een nacht werk niet reconstrueren.
-
-### 4.9 Kosten
-
-Indicatieve tarieven per miljoen tokens (verifieer bij de bouw — tarieven wijzigen):
-
-| Model | Invoer | Uitvoer | Rol in het ontwerp |
-|---|---|---|---|
-| Claude Opus 5 | $5 | $25 | Uitvoerder bij complex werk |
-| Claude Sonnet 5 | $2 | $10 | Uitvoerder bij routinewerk |
-| Claude Haiku 4.5 | $1 | $5 | Classificatie, samenvatten, triage |
-| OpenAI-reviewer (middenklasse) | ~$2 | ~$12 | Reviewer |
-
-*De OpenAI-tarieven komen uit een derde-partijbron; de officiële prijspagina was vanuit
-deze omgeving niet bereikbaar. Vóór de bouw verifiëren.*
-
-Kostenbeperkende maatregelen die in het ontwerp zitten: promptcaching op de stabiele
-projectcontext, de reviewer krijgt de **diff plus testuitslag** in plaats van de hele
-repo, verificatie gebeurt zonder model, en triage draait op het goedkoopste model.
-
----
-
-## 5. Afgewogen alternatieven
-
-| Alternatief | Oordeel | Reden |
+| # | Vraag | Waarom ik het niet zelf kan invullen |
 |---|---|---|
-| **Browserautomatisering van beide chat-UI's** | **Afgewezen** | In strijd met de voorwaarden van OpenAI, technisch fragiel, breekt bij elke UI-wijziging. |
-| **Alleen Claude Code, met subagents + hooks, zonder GPT** | **Aanbevolen als fase 1** | Levert het grootste deel van de winst tegen een fractie van de complexiteit. Eén leverancier, één factuur, geen datadeling. |
-| **n8n / Zapier / Make als motor** | **Afgewezen als motor** | Langlopende, stateful agentlussen met git-worktrees en budgetten passen slecht in een knooppuntendiagram. Prima voor de notificaties. |
-| **GitHub Actions als runtime (geen daemon)** | **Levensvatbaar alternatief** | Gebeurtenisgestuurd, geen machine die aan moet staan, past bij je bestaande workflow-ervaring. Nadelen: joblimiet van 6 uur, trager opstarten, lastiger interactief bijsturen. Overweeg dit als je geen machine 24/7 wilt laten draaien. |
-| **LangGraph / Temporal voor duurzame toestand** | **Nu overbodig** | Op jouw schaal doet SQLite + een expliciete toestandsmachine hetzelfde. Temporal is de opschaalroute als er ooit meerdere gebruikers bijkomen. |
-| **Codex CLI (`codex exec`) als tweede uitvoerder** | **Optie voor later** | Officieel niet-interactief te draaien met JSON-uitvoer. Interessanter als tweede *uitvoerder* voor A/B-vergelijking dan als reviewer. |
+| **B2** | Waar draait de orkestrator: een machine van jou die aan blijft, een kleine VPS, of GitHub Actions? | Bepaalt of nachtelijk doorwerken kan en hoe de opslag ingericht wordt. Ik ontwerp zo dat alle drie werken, maar V1 moet er één kiezen. |
+| **N1** | Hoe vullen we de kennisbasis bij de start? ChatGPT-export, een korte vragenlijst per project, of leeg beginnen en hem laten volgroeien? | Dit bepaalt of de AUTO-route vanaf dag één werkt of pas na weken. Grootste invloed op je directe tijdwinst. Alleen jij kunt de export maken. |
+| **B4** | Hoe ver mag het gaan met git: committen, pushen naar `orch/*`, PR openen, mergen? | Risicogrens. Mijn advies: alles behalve mergen. |
+| **N3** | Via welk kanaal wil je een BLOCK-melding *onmiddellijk* krijgen, en waar mag de dagbundel heen? | "Onmiddellijk melden" is alleen echt als het kanaal je ook bereikt. |
+| **B5** | Op welk project valideren we V1 als eerste? | V1 heeft één project nodig om zich te bewijzen. Dit beperkt de architectuur niet — die is projectonafhankelijk (B6). |
 
 ---
 
-## 6. Faseplan
-
-Elke fase levert op zichzelf werkende waarde. Je kunt na elke fase stoppen.
-
-### Fase 0 — Meten (halve dag, geen code)
-Kies één pilotproject. Leg van vijf taken vast: doorlooptijd, aantal keren dat jij moest
-ingrijpen, en waarvoor. Zonder deze nulmeting kun je later niet aantonen dat het werkt.
-
-### Fase 1 — De onbewaakte lus, één project, zonder GPT
-Backlog + Claude-adapter + verificatie + git-worktree + stopcondities + logboek.
-**Wat je wint:** je geeft een taak op en krijgt een groene branch terug, of een duidelijke
-melding waarom niet. Geen plakwerk meer binnen één taak.
-
-### Fase 2 — Reviewer en vragenparkeerplaats
-OpenAI Responses API met JSON-verdict, vraagclassificatie, dagbundel, aannameregistratie
-met correctietaken.
-**Wat je wint:** kwaliteitspoort van een tweede model, en je onderbrekingen zakken van
-tientallen per dag naar één beslismoment.
-
-### Fase 3 — Meerdere projecten
-Scheduler, gelijktijdigheidslimieten, budgetten per project, overzicht over alles heen.
-**Wat je wint:** doorvoer. Vier projecten vorderen terwijl jij er één beoordeelt.
-
-### Fase 4 — Verfijning (alleen op basis van meting)
-Automatische taakontleding uit een roadmap-document, kostenanalyse per taaksoort,
-model-per-taaksoort afstemmen, eventueel dashboard.
-
-**Volgorde-advies:** bouw fase 1 en gebruik hem twee weken echt. De meetgegevens uit die
-twee weken bepalen of fase 2 de reviewer waard is — en dat is een beter argument dan wat
-jij of ik nu vermoeden.
-
----
-
-## 7. Risico's
-
-| # | Risico | Kans | Impact | Mitigatie |
-|---|---|---|---|---|
-| R1 | Kosten lopen weg in een onbewaakte lus | Middel | Hoog | Harde budgetkap op vier niveaus, geen-vooruitgang-detector, dagelijkse kostenrapportage |
-| R2 | De lus draait rond zonder vooruitgang | Hoog zonder maatregel | Middel | Verificatie als motor (§3), iteratielimiet, herhaalde-fout-detectie |
-| R3 | Slechte code komt ongemerkt in `main` | Laag | Hoog | Nooit direct naar `main`, commit alleen na groene verificatie, PR-poort |
-| R4 | Code/diffs naar een tweede leverancier | Zeker | Afhankelijk | Per project instelbare datapolicy; standaard: geen `.env`, geen secrets, alleen diffs. Voor gevoelige projecten: reviewer uit. |
-| R5 | Promptinjectie via repo-inhoud of issues | Laag | Hoog | Repo-inhoud is data, nooit opdracht; lus mag eigen instellingen niet wijzigen |
-| R6 | Verkeerd geclassificeerde vragen | Middel | Middel | Conservatieve regel (§4.5), correctietaken bij afwijkende antwoorden |
-| R7 | Sessiehervatting breekt na een update | Middel | Laag | Taakstatus in SQLite is de waarheid; sessie is optimalisatie, geen afhankelijkheid |
-| R8 | Je bouwt de orkestrator in plaats van je projecten | **Hoog** | **Hoog** | Gefaseerd, elke fase apart bruikbaar; harde tijdsbegroting per fase; fase 1 vóór alle uitbreiding |
-
-R8 verdient aandacht. Het doel is snellere oplevering van je projecten. Een orkestrator
-die drie weken bouwtijd kost voordat hij iets oplevert, is per definitie een verlies.
-
----
-
-## 8. Wat ik van jou nodig heb
-
-Gebundeld, zoals het systeem het straks zelf zal doen. Zonder deze antwoorden kan ik
-fase 1 wel voorbereiden, maar niet afronden.
-
-| # | Beslissing | Waarom het uitmaakt | Mijn advies |
-|---|---|---|---|
-| **B1** | API-facturering akkoord, of moet het binnen je abonnementen blijven? | Bepaalt of `--bare` gebruikt kan worden en dus hoe robuust scripts zijn | Aparte API-sleutel met eigen budgetplafond; scheidt de kosten van de orkestrator van je dagelijks gebruik |
-| **B2** | Waar draait het? Altijd-aan machine, kleine VPS, of GitHub Actions? | Bepaalt of sessie-hervatting bruikbaar is en of nachtelijk doorwerken kan | Begin lokaal op een machine die aan blijft; GitHub Actions als je dat niet wilt |
-| **B3** | Mag code/diff naar OpenAI? Per project instelbaar? | Datagovernance, en het bestaan van de reviewer hangt ervan af | Per project instelbaar, standaard aan behalve voor projecten met klantgegevens |
-| **B4** | Autonomieniveau: mag hij committen? Pushen? PR openen? Mergen? | Bepaalt hoeveel je nog handmatig doet | Committen en pushen naar `orch/*` ja, PR openen ja, mergen nooit |
-| **B5** | Welk project wordt de pilot? | Fase 1 heeft er precies één nodig | Het project waar je nu de meeste iteraties op doet |
-| **B6** | Welke projecten zijn er nog meer? | Ik ken alleen `padelmq-teller` | — |
-| **B7** | Startbudget per dag | Nodig voor de budgetbewaker | Begin laag (bv. €5/dag globaal) en verhoog op basis van meting |
-
----
-
-## 9. Hoe we bewijzen dat het werkt
-
-De orkestrator meet zichzelf vanaf de eerste run. Na twee weken beantwoord je met data,
-niet met gevoel:
+## 13. Meetplan
 
 | Meetpunt | Wat het aantoont |
 |---|---|
-| Doorlooptijd per taak (aangemaakt → `DONE`) | De kernbelofte |
-| Aantal menselijke interventies per taak | Of "vrijwel geen plakwerk" gehaald is |
-| Aantal onderbrekingen per dag (blokkerende vragen buiten de bundel) | Of de vraagbundeling werkt |
-| Kosten per afgeronde taak | Of het economisch klopt |
-| Aandeel taken dat de verificatie haalt zonder reviewronde | **Of de reviewer zijn kosten waard is** (§3) |
-| Aandeel `revise`-verdicten dat daadwerkelijk tot een betere diff leidt | Idem |
-
-De laatste twee zijn expliciet bedoeld om mijn eigen aanbeveling te kunnen weerleggen.
-Als blijkt dat de reviewer in 40% van de gevallen een echte fout vangt die de tests
-missen, dan had jij gelijk en promoveren we hem.
+| Doorlooptijd per taak | De kernbelofte |
+| Menselijke interventies per taak | Of het knip- en plakwerk echt weg is |
+| **Verdeling AUTO / PARK / BLOCK** | Of de kennisbasis rijk genoeg is; veel PARK = kennisbasis vullen |
+| Onterechte AUTO's die jij achteraf corrigeert | **De belangrijkste veiligheidsmeting.** Boven nul → citatieplicht aanscherpen |
+| Onderbrekingen per dag buiten de bundel | Of het bundelen werkt |
+| Kosten per afgeronde taak, per project en per model | Of het economisch klopt (B1) |
+| Aandeel taken dat groen wordt zonder reviewronde | Wat de beoordelaarsrol toevoegt |
+| Aandeel voorgestelde alternatieven dat jij overneemt | Of de verplichte tegenspraak waarde levert (§7) |
 
 ---
 
-## 10. Bronnen
+## 14. Bronnen
 
 - Claude Agent SDK — overzicht: https://code.claude.com/docs/en/agent-sdk/overview
 - Claude Agent SDK — sessies, resume en fork: https://code.claude.com/docs/en/agent-sdk/sessions
-- Claude Code programmatisch draaien (`-p`, uitvoerformaten, rechten): https://code.claude.com/docs/en/headless
-- OpenAI — gespreksstatus (`previous_response_id`, Conversations): https://developers.openai.com/api/docs/guides/conversation-state
+- Claude Code programmatisch draaien: https://code.claude.com/docs/en/headless
+- OpenAI — gespreksstatus: https://developers.openai.com/api/docs/guides/conversation-state
 - OpenAI — gestructureerde uitvoer: https://developers.openai.com/api/docs/guides/structured-outputs
-- OpenAI — gebruiksvoorwaarden (geautomatiseerde toegang): https://openai.com/policies/row-terms-of-use/
+- OpenAI — gebruiksvoorwaarden, geautomatiseerde toegang: https://openai.com/policies/row-terms-of-use/
 - OpenAI Agents SDK (Python): https://github.com/openai/openai-agents-python
 - OpenAI Codex CLI (`codex exec`): https://en.wikipedia.org/wiki/OpenAI_Codex_(AI_agent)
 - Prijsindicatie OpenAI (derde partij, te verifiëren): https://www.morphllm.com/openai-api-pricing
 
 ---
 
-*Volgende stap: beantwoord B1 t/m B7 uit §8, of geef aan dat je fase 1 anders wilt
-insteken. Ik bouw pas na jouw akkoord.*
+*Er wordt niets geïmplementeerd voordat B2, N1, B4, N3 en B5 beantwoord zijn.*
