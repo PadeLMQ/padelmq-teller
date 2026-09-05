@@ -281,6 +281,68 @@ def _reviewer_auth_status() -> tuple[bool, str]:
     aantal = len(getattr(modellen, "data", []) or [])
     return True, f"OK via {bron} ({aantal} modellen zichtbaar, gratis eindpunt)"
 
+def cmd_serve(args) -> int:
+    """Blijf draaien: herstellen, antwoorden ophalen, werk afwerken."""
+    from .answers import process_answers
+    from .notify.github import GitHubClient
+    from .serve import Serve
+
+    settings = _settings()
+    db = _db(settings)
+    slugs = [args.project] if args.project else projects_mod.list_projects(settings)
+    if not slugs:
+        print("geen projecten om te draaien")
+        return 0
+
+    def herstel() -> int:
+        totaal = 0
+        for slug in slugs:
+            uitkomst = recover(db.scope(slug))
+            for regel in uitkomst.regels():
+                print(f"[{slug}] herstel: {regel}")
+            totaal += len(uitkomst.hervatte_taken) + len(uitkomst.verweesde_runs)
+        return totaal
+
+    def antwoorden() -> int:
+        totaal = 0
+        for slug in slugs:
+            project = projects_mod.load(settings, slug)
+            if not project.github_repo:
+                continue
+            for actie in process_answers(scope=db.scope(slug), project=project,
+                                         client=GitHubClient()):
+                print(f"[{slug}] antwoord: {actie}")
+                totaal += 1
+        return totaal
+
+    def werk() -> int:
+        gedaan = 0
+        for slug in slugs:
+            scope = db.scope(slug)
+            if scope.next_queued() is None:
+                continue
+            project = projects_mod.load(settings, slug)
+            runner = _build_runner(settings, db, project)
+            taak = scope.next_queued()
+            print(f"\n[{slug}] taak {taak['id']}: {taak['title']}")
+            uitkomst = runner.run_task(taak["id"])
+            print(f"[{slug}] -> {uitkomst.status.value}: {uitkomst.detail}")
+            gedaan += 1
+        return gedaan
+
+    lus = Serve(recover_fn=herstel, poll_fn=antwoorden, work_fn=werk,
+                interval=args.interval, on_event=lambda t: print(f"! {t}"))
+    if settings.paused():
+        print(f"noodstop actief ({settings.stop_file}); er wordt niets gedaan")
+        return 1
+    print(f"draait, ronde elke {args.interval}s bij stilte. Ctrl-C om te stoppen.")
+    try:
+        lus.run(rondes=args.rounds)
+    except KeyboardInterrupt:
+        print("\ngestopt")
+    return 0
+
+
 def cmd_efficiency(args) -> int:
     from .efficiency import format_efficiency, measure
 
@@ -722,6 +784,14 @@ def build_parser() -> argparse.ArgumentParser:
     requeue.add_argument("project")
     requeue.add_argument("id", type=int)
     requeue.set_defaults(func=cmd_task_requeue)
+
+    serve = sub.add_parser("serve", help="blijf draaien: herstel, antwoorden, werk")
+    serve.add_argument("project", nargs="?")
+    serve.add_argument("--interval", type=int, default=60,
+                       help="seconden wachten na een stille ronde")
+    serve.add_argument("--rounds", type=int, default=None,
+                       help="stop na dit aantal rondes (standaard: eeuwig)")
+    serve.set_defaults(func=cmd_serve)
 
     eff = sub.add_parser("efficiency", help="nuttige tegenover verspilde AI-kosten")
     eff.add_argument("project", nargs="?")
