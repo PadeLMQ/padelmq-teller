@@ -177,6 +177,7 @@ class Runner:
             tokens_in=result_usage.tokens_in,
             tokens_out=result_usage.tokens_out,
             cached_in=result_usage.cached_in,
+            reported_cost=getattr(result_usage, "cost_usd", None),
         )
         try:
             self.cost.record(

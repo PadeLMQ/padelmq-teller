@@ -159,15 +159,34 @@ class ClaudeExecutor:
                 cost_of_switching=alt.get("cost_of_switching", ""),
                 recommendation=alt.get("recommendation", "geen"),
             ),
-            usage=Usage(
-                model=self.model,
-                tokens_in=int(usage.get("input_tokens", 0) or 0),
-                tokens_out=int(usage.get("output_tokens", 0) or 0),
-                cached_in=int(usage.get("cache_read_input_tokens", 0) or 0),
-            ),
+            usage=_usage_from_cli(self.model, usage, payload),
             raw=payload,
         )
 
+
+
+def _usage_from_cli(model: str, usage: dict, payload: dict) -> Usage:
+    """Vertaalt de telling van de Claude-CLI naar het contract van Usage.
+
+    De CLI rapporteert input_tokens ZONDER de cachetokens en zet cache_read en
+    cache_creation er los naast. Usage.tokens_in wil het totaal, dus die drie
+    worden opgeteld. Zonder die optelling lijken er meer cachetokens dan
+    invoertokens te zijn en slaat de consistentiebewaking terecht alarm.
+
+    Alleen cache_read gaat als cached_in door: een cacheschrijfactie is geen
+    goedkope leesactie en hoort niet tegen het cachetarief geboekt te worden.
+    """
+    vers = int(usage.get("input_tokens", 0) or 0)
+    gelezen = int(usage.get("cache_read_input_tokens", 0) or 0)
+    geschreven = int(usage.get("cache_creation_input_tokens", 0) or 0)
+    gerapporteerd = payload.get("total_cost_usd")
+    return Usage(
+        model=model,
+        tokens_in=vers + gelezen + geschreven,
+        tokens_out=int(usage.get("output_tokens", 0) or 0),
+        cached_in=gelezen,
+        cost_usd=float(gerapporteerd) if gerapporteerd is not None else None,
+    )
 
 def assumptions_without_source(assumptions: list[str]) -> list[str]:
     """Een aanname zonder bron is geen aanname maar een gok."""

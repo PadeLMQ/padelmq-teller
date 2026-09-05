@@ -12,10 +12,29 @@ from ..models import Question, Verdict
 
 @dataclass
 class Usage:
+    """Verbruik van een aanroep, genormaliseerd over aanbieders heen.
+
+    LET OP het contract, want de aanbieders tellen verschillend:
+
+    - ``tokens_in`` is het TOTAAL aan invoertokens, cachetokens inbegrepen.
+    - ``cached_in`` is het deel daarvan dat uit de cache kwam.
+
+    De Responses-API van OpenAI telt zo (input_tokens is het totaal,
+    cached_tokens een onderdeel). De Claude-CLI telt anders: daar sluit
+    input_tokens de cachetokens juist UIT en staan cache_read en
+    cache_creation los ernaast. Die moeten dus opgeteld worden voordat ze hier
+    binnenkomen; anders lijkt de cache groter dan de invoer.
+
+    ``cost_usd`` is de kostprijs zoals de aanbieder die zelf rapporteert. Is
+    die er, dan gaat ze voor op onze eigen berekening uit tokens en tarieven:
+    de aanbieder weet het beter dan onze prijstabel.
+    """
+
     model: str
     tokens_in: int = 0
     tokens_out: int = 0
     cached_in: int = 0
+    cost_usd: float | None = None
 
 
 @dataclass

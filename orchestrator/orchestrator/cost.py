@@ -50,6 +50,10 @@ class Estimate:
     tokens_in: int
     tokens_out: int
     cached_in: int = 0
+    # De kostprijs zoals de aanbieder die zelf rapporteert. Is die er, dan gaat
+    # ze voor: onze prijstabel is een benadering, de afrekening van de
+    # aanbieder is het echte bedrag.
+    reported_cost: float | None = None
 
     @property
     def uncached_in(self) -> int:
@@ -62,6 +66,8 @@ class Estimate:
         return self.tokens_in - self.cached_in
 
     def cost(self, price: ModelPrice) -> float:
+        if self.reported_cost is not None:
+            return float(self.reported_cost)
         return (
             self.uncached_in / 1_000_000 * price.input_per_mtok
             + self.tokens_out / 1_000_000 * price.output_per_mtok
