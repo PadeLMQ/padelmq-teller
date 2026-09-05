@@ -178,3 +178,17 @@ def hartslagregel(ronde_nummer: int, ronde, *, tijd: str, interval: int) -> str:
             f"taken={ronde.taken} fouten={ronde.fouten}")
     staat = "stil" if ronde.stil else "werk gedaan"
     return f"[HART] ronde {ronde_nummer} {tijd} {staat}; {werk}; volgende over {interval}s"
+
+
+def controleer_projecten(slugs: list[str], map_pad) -> Controle:
+    """Nul projecten is geen rust, het is een verkeerd geconfigureerde dienst.
+
+    Op een vers volume staat er niets. Zonder deze controle komt de dienst op,
+    heeft niets te doen, sluit netjes af, en meldt Railway "Completed" - groen,
+    en volkomen misleidend.
+    """
+    if not slugs:
+        return Controle("projecten", False,
+                        f"geen enkel project in {map_pad}; zet ORCH_PROJECTS in de "
+                        "omgeving of draai 'orchestrator project add'")
+    return Controle("projecten", True, f"{len(slugs)}: {', '.join(slugs)}")

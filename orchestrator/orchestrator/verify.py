@@ -37,6 +37,19 @@ FORBIDDEN_PATTERNS: tuple[tuple[str, re.Pattern[str]], ...] = (
         r"\b(ENABLE_STOCK_WRITE|STOCK_SYNC_UP_ENABLED)\s*=\s*[\"']?true", re.I)),
     ("rechtstreekse Shopify-aanroep", re.compile(r"myshopify\.com|admin/api/.*graphql", re.I)),
     ("netwerkaanroep vanuit een check", re.compile(r"\b(curl|wget|http(ie)?)\b", re.I)),
+    # Bovenstaande lijst gaat over bedrijfsacties. Deze gaat over de machine
+    # zelf. Aanleiding: sinds projecten ook uit een omgevingsvariabele kunnen
+    # komen (ORCH_PROJECTS) is er een weg bij waarlangs een check binnenkomt,
+    # en een verificatiecommando heeft nooit een reden om iets te verwijderen,
+    # te pushen of geschiedenis te herschrijven. Wat een check hoort te doen is
+    # draaien en een exitcode teruggeven.
+    ("verwijderen van bestanden", re.compile(r"\brm\s+(-\w*[rf]|--recursive|--force)", re.I)),
+    ("verhoogde rechten", re.compile(r"\b(sudo|doas|su)\s", re.I)),
+    ("schrijven naar een repository", re.compile(r"\bgit\s+(push|remote\s+set-url)\b", re.I)),
+    ("geschiedenis herschrijven", re.compile(
+        r"\bgit\s+(reset\s+--hard\b|clean\s+-\w*f|filter-branch\b|rebase\b)", re.I)),
+    ("ingrijpen op schijf of machine", re.compile(
+        r"\b(mkfs\w*\b|dd\s+if=|shutdown\b|reboot\b|halt\b)", re.I)),
 )
 
 

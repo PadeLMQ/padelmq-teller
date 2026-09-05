@@ -29,6 +29,13 @@ fi
 # De klonen van de projecten staan op het volume, maar na een herstart kan er
 # een ontbreken of achterlopen. Dit haalt ze terug zonder bestaande worktrees
 # weg te gooien.
+# Een vers volume is leeg. Zonder deze stap komt de dienst op met nul
+# projecten, heeft niets te doen, en sluit af met code 0 -- wat Railway als
+# "Completed" toont. Groen, en volkomen misleidend. Bestaande projecten worden
+# nooit overschreven: het volume is de waarheid zodra het bestaat.
+echo "== projecten =="
+python3 -m orchestrator.cli project ensure
+
 echo "== repositories =="
 python3 -m orchestrator.cli project bootstrap || echo "   let op: niet elke repository is beschikbaar"
 

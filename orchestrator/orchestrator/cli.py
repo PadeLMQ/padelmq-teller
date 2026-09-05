@@ -292,7 +292,8 @@ def _opstartrapport(settings, *, met_doctor: bool):
     """Bouwt het rapport dat bij elke start in de log komt."""
     from .notify.github import GitHubClient
     from .opstart import (Rapport, controleer_claude, controleer_datamap,
-                          controleer_doctor, controleer_github, controleer_openai)
+                          controleer_doctor, controleer_github, controleer_openai,
+                          controleer_projecten)
 
     slugs = projects_mod.list_projects(settings)
     repos = []
@@ -306,6 +307,7 @@ def _opstartrapport(settings, *, met_doctor: bool):
 
     rapport = Rapport()
     rapport.controles.append(controleer_datamap(settings.data_dir))
+    rapport.controles.append(controleer_projecten(slugs, settings.projects_dir))
     rapport.controles.append(controleer_github(GitHubClient, repos))
     rapport.controles.append(controleer_openai(_reviewer_auth_status))
     rapport.controles.append(controleer_claude())
@@ -340,8 +342,15 @@ def cmd_serve(args) -> int:
     db = _db(settings)
     slugs = [args.project] if args.project else projects_mod.list_projects(settings)
     if not slugs:
-        print("geen projecten om te draaien")
-        return 0
+        # Afsluiten met 0 zou hier het gevaarlijkste antwoord zijn: Railway
+        # meldt de container dan als "Completed" en dat ziet er groen uit
+        # terwijl er niets draait. Precies de toestand die we net hebben
+        # opgelost. Dus luidruchtig falen, met wat eraan ontbreekt.
+        print("[FOUT] serve        geen enkel project geconfigureerd in "
+              f"{settings.projects_dir}", flush=True)
+        print("       Een lus zonder projecten kan niets doen. Zet ORCH_PROJECTS "
+              "in de omgeving, of draai 'orchestrator project add'.", flush=True)
+        return 1
 
     def herstel() -> int:
         totaal = 0
@@ -449,6 +458,29 @@ def cmd_intake(args) -> int:
             continue
         for actie in intake(scope=db.scope(slug), project=project, client=GitHubClient()):
             print(f"{slug}: {actie}")
+    return 0
+
+
+def cmd_project_ensure(args) -> int:
+    """Zet de projecten uit de omgeving op het volume, als ze er nog niet staan.
+
+    Idempotent met opzet: een bestaand project wordt nooit overschreven. Het
+    volume is de waarheid zodra het bestaat.
+    """
+    from .provision import ProvisionError, provision
+
+    settings = _settings()
+    try:
+        uitkomst = provision(settings)
+    except ProvisionError as exc:
+        print(f"projecten uit de omgeving: {exc}", file=sys.stderr)
+        return 1
+    for regel in uitkomst.regels():
+        print(f"   {regel}")
+    for slug in uitkomst.aangemaakt:
+        _db(settings).ensure_project(slug)
+    if not uitkomst.regels():
+        print("   geen projecten opgegeven in de omgeving")
     return 0
 
 
@@ -891,6 +923,9 @@ def build_parser() -> argparse.ArgumentParser:
     add.set_defaults(func=cmd_project_add)
     listing = project.add_parser("list", help="projecten tonen")
     listing.set_defaults(func=cmd_project_list)
+    ensure = project.add_parser(
+        "ensure", help="ontbrekende projecten aanmaken uit $ORCH_PROJECTS")
+    ensure.set_defaults(func=cmd_project_ensure)
 
     task = sub.add_parser("task", help="taken beheren").add_subparsers(dest="sub", required=True)
     task_add = task.add_parser("add")

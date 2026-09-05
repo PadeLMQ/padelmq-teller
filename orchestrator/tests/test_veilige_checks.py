@@ -57,6 +57,19 @@ class VeiligeChecks(TempCase):
         with self.assertRaises(UnsafeCheck):
             assert_safe_checks({"x": 'STOCK_SYNC_UP_ENABLED="true" npm run test'})
 
+    def test_destructieve_shell_wordt_geweigerd(self):
+        """Sinds projecten ook uit ORCH_PROJECTS kunnen komen, is er een weg bij
+        waarlangs een check binnenkomt. Een verificatiecommando heeft nooit een
+        reden om te verwijderen, te pushen of geschiedenis te herschrijven."""
+        for commando in ["rm -rf /", "npm test && rm -rf node_modules",
+                         "sudo npm run test", "git push origin main",
+                         "git reset --hard HEAD~1", "git clean -fd",
+                         "dd if=/dev/zero of=/dev/sda", "mkfs.ext4 /dev/sda1",
+                         "shutdown -h now"]:
+            with self.subTest(commando=commando):
+                with self.assertRaises(UnsafeCheck, msg=f"{commando} werd toegelaten"):
+                    assert_safe_checks({"x": commando})
+
     def test_rechtstreekse_shopify_aanroepen_worden_geweigerd(self):
         with self.assertRaises(UnsafeCheck):
             assert_safe_checks({"x": "curl https://winkel.myshopify.com/admin/api/2025-10/graphql.json"})

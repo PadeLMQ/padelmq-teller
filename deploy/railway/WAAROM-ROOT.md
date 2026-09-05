@@ -50,3 +50,43 @@ Daarna print `serve` elke ronde een `[HART]`-regel, ook als er niets gebeurde:
     [HART] ronde 12 2026-09-05T23:07:32+00:00 stil; hersteld=0 ... ; volgende over 120s
 
 Juist die stille regels maken het verschil tussen "niets te doen" en "dood".
+
+## En waarom "Completed" ook fout was
+
+Na de eerste fix bouwde en startte de container wel, maar meldde Railway de
+service als **Completed** in plaats van Online. De oorzaak lag een laag dieper
+en was dezelfde soort fout.
+
+Projectconfiguratie staat op het volume, onder `/data/orchestrator/projects`.
+Een vers volume is leeg, en er was geen weg om er projecten op te krijgen
+behalve met de hand `orchestrator project add` draaien — waarvoor je een shell
+nodig hebt die er niet is. Dus: nul projecten, `serve` had niets te doen, en
+sloot af met code 0. Exitcode 0 leest als succes. Groen, en niets draait.
+
+Twee dingen zijn daarop veranderd.
+
+**Nul projecten is nu luidruchtig fout.** Het opstartrapport heeft een regel
+`projecten` erbij, en `serve` stopt met exitcode 1 in plaats van 0. Een lus
+zonder projecten is een verkeerd geconfigureerde dienst, geen rustige dienst.
+
+**Projecten kunnen uit de omgeving komen.** `start.sh` draait
+`orchestrator project ensure`, dat `ORCH_PROJECTS` leest: JSON met een lijst
+projecten. Bijvoorbeeld:
+
+    [{"slug":"orchestrator-zelf",
+      "github_repo":"PadeLMQ/padelmq-teller",
+      "default_branch":"main",
+      "checks":{"tests":"python3 -m unittest discover -s orchestrator/tests -t orchestrator"}}]
+
+Staat `repo` er niet in, dan komt de kloon onder `ORCH_REPOS` op het volume te
+staan. Een project dat al op het volume staat wordt **nooit** overschreven: het
+volume is de waarheid zodra het bestaat, anders zou een oude variabele later
+stilletjes wijzigingen terugdraaien. Wat er niet in staat wordt niet geraden —
+een project zonder `slug` is een fout met een leesbare melding.
+
+Omdat hiermee een nieuwe weg ontstaat waarlangs verificatiecommando's
+binnenkomen, is de veiligheidspoort in `verify.py` uitgebreid. Die weigerde al
+bedrijfsacties (sync, import, deploy, Shopify-schrijfacties); nu ook
+destructieve shell: verwijderen, `sudo`, `git push`, geschiedenis herschrijven,
+en ingrijpen op schijf of machine. Een verificatiecommando hoort te draaien en
+een exitcode terug te geven, meer niet.
