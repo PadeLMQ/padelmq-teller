@@ -472,3 +472,40 @@ class Hervatten(Lus):
         events = [r for r in self.scope.events(limit=50)
                   if r["kind"] == "herhaalde-herziening"]
         self.assertTrue(events, "de herhaling is niet vastgelegd")
+
+    def test_post_check_draait_niet_in_de_baseline_maar_wel_erna(self):
+        """Een check die de wijziging zelf mogelijk maakt, kan niet in de baseline.
+
+        Dit blokkeerde taak 4: het acceptatiecriterium eiste 'npm run lint geeft
+        exit 0', maar lint stond niet bij de checks en kon er ook niet bij --
+        op main faalt hij. De beoordelaar bleef dus terecht om bewijs vragen dat
+        de orkestrator nooit kon leveren.
+        """
+        # Groen zodra 'nieuw.txt' bestaat: rood op main, groen na de wijziging.
+        na = ("python3 -c \"import pathlib,sys; "
+              "sys.exit(0 if pathlib.Path('nieuw.txt').exists() else 1)\"")
+        runner = self.build(checks={"tests": GROEN},
+                            steps=[{"write": {"nieuw.txt": "er\n"}}])
+        self.project.post_checks = {"lint": na}
+        task_id = self.task(runner)
+
+        uitkomst = runner.run_task(task_id)
+
+        self.assertEqual(uitkomst.status, TaskStatus.PR_OPEN,
+                         "de baseline is gestrand op een check die daar niet hoort")
+        verificaties = [json.loads(r["payload"]) for r in self.scope.events(limit=50)
+                        if r["kind"] == "verificatie"]
+        self.assertTrue(verificaties)
+        namen = {c["naam"] for c in verificaties[0]["checks"]}
+        self.assertIn("lint", namen, "de post-check is na de wijziging niet gedraaid")
+        self.assertIn("tests", namen)
+
+    def test_post_check_die_faalt_houdt_de_taak_tegen(self):
+        nooit = "python3 -c \"import sys; sys.exit(1)\""
+        runner = self.build(checks={"tests": GROEN},
+                            steps=[{"write": {"a.py": "x = 1\n"}}])
+        self.project.post_checks = {"lint": nooit}
+        task_id = self.task(runner)
+        uitkomst = runner.run_task(task_id)
+        self.assertNotEqual(uitkomst.status, TaskStatus.PR_OPEN,
+                            "een falende post-check leverde toch een PR op")

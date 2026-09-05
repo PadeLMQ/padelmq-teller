@@ -588,7 +588,10 @@ class Runner:
         en zetten daarna alleen terug wat er tijdens de verificatie bij kwam.
         """
         voor = self._gewijzigde_bestanden(worktree)
-        verification = self.verifier.run(worktree.path, self.project.checks)
+        # De baseline draait alleen self.project.checks; hier komen de checks
+        # erbij die pas ná de wijziging zinvol zijn.
+        alle = {**self.project.checks, **self.project.post_checks}
+        verification = self.verifier.run(worktree.path, alle)
         erbij = sorted(self._gewijzigde_bestanden(worktree) - voor)
         if not erbij:
             return verification

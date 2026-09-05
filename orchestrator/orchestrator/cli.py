@@ -56,8 +56,15 @@ def cmd_project_add(args) -> int:
             print(f"check {pair!r} moet de vorm naam=commando hebben", file=sys.stderr)
             return 2
         checks[name.strip()] = command.strip()
+    post = {}
+    for pair in getattr(args, "post_check", None) or []:
+        name, _, command = pair.partition("=")
+        if not command:
+            print(f"post-check {pair!r} moet de vorm naam=commando hebben", file=sys.stderr)
+            return 2
+        post[name.strip()] = command.strip()
     project = projects_mod.add(
-        settings, args.slug, args.repo, checks=checks,
+        settings, args.slug, args.repo, checks=checks, post_checks=post,
         github_repo=args.github_repo or "", default_branch=args.branch,
     )
     _db(settings).ensure_project(args.slug)
@@ -717,6 +724,8 @@ def build_parser() -> argparse.ArgumentParser:
     add.add_argument("--github-repo", default="", help="eigenaar/repo voor issues en PR's")
     add.add_argument("--branch", default="main")
     add.add_argument("--check", action="append", metavar="NAAM=COMMANDO")
+    add.add_argument("--post-check", action="append", metavar="NAAM=COMMANDO",
+                     help="check die pas na de wijziging draait, niet in de baseline")
     add.set_defaults(func=cmd_project_add)
     listing = project.add_parser("list", help="projecten tonen")
     listing.set_defaults(func=cmd_project_list)

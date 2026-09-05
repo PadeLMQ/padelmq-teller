@@ -40,6 +40,11 @@ class Project:
     # taak horen. Bewust een expliciete lijst en geen brede opruiming: alles
     # terugzetten wat tijdens de verificatie wijzigt, zou echt werk kunnen
     # wissen als een check ooit iets nuttigs genereert.
+    # Checks die pas ná de wijziging zinvol zijn. Ze draaien NIET in de baseline,
+    # want de wijziging die ze mogelijk maakt staat daar nog niet. Denk aan een
+    # lintcheck die pas kan slagen zodra de configuratie is toegevoegd: die in de
+    # gewone checks zetten zou elke run laten stranden op baseline-rood.
+    post_checks: dict[str, str] = field(default_factory=dict)
     verification_artifacts: list[str] = field(
         default_factory=lambda: ["next-env.d.ts"]
     )
@@ -68,6 +73,7 @@ class Project:
                 "auto_merge": self.auto_merge,
                 "branch_prefix": self.branch_prefix,
                 "verification_artifacts": self.verification_artifacts,
+                "post_checks": self.post_checks,
                 "notify": self.notify,
             },
             sort_keys=False,
@@ -107,6 +113,7 @@ def load(settings: Settings, slug: str) -> Project:
         reviewer_enabled=bool(raw.get("reviewer_enabled", True)),
         redact_patterns=list(raw.get("redact_patterns") or []),
         auto_merge=bool(raw.get("auto_merge", False)),
+        post_checks=dict(raw.get("post_checks") or {}),
         verification_artifacts=list(
             raw.get("verification_artifacts") or ["next-env.d.ts"]
         ),
@@ -130,6 +137,7 @@ def add(
     repo: str,
     *,
     checks: dict[str, str] | None = None,
+    post_checks: dict[str, str] | None = None,
     github_repo: str = "",
     default_branch: str = "main",
 ) -> Project:
@@ -138,7 +146,7 @@ def add(
     if (root / "project.yaml").exists():
         raise ProjectError(f"project {slug!r} bestaat al")
     checks = checks or {}
-    assert_safe_checks(checks)  # weiger meteen bij het toevoegen, niet pas bij de eerste run
+    assert_safe_checks({**checks, **(post_checks or {})})  # weiger meteen bij het toevoegen, niet pas bij de eerste run
     project = Project(
         slug=slug,
         repo=repo,
@@ -146,6 +154,7 @@ def add(
         default_branch=default_branch,
         github_repo=github_repo,
         checks=checks,
+        post_checks=dict(post_checks or {}),
         strength=infer_strength(checks),
     )
     root.mkdir(parents=True, exist_ok=True)
