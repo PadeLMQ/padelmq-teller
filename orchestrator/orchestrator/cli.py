@@ -484,6 +484,30 @@ def cmd_project_ensure(args) -> int:
     return 0
 
 
+def cmd_project_seed(args) -> int:
+    """Geeft een lege kennisbasis eenmalig het zaaigoed uit de projectrepository.
+
+    Draait na bootstrap, want het zaaigoed komt uit de kloon. Bestaande kennis
+    wordt nooit overschreven en zaaien gebeurt hooguit één keer per project.
+    """
+    from .zaaien import BRONMAP, ZaaiGeweigerd, zaai
+
+    settings = _settings()
+    slugs = [args.project] if args.project else projects_mod.list_projects(settings)
+    fouten = 0
+    for slug in slugs:
+        project = projects_mod.load(settings, slug)
+        try:
+            uitkomst = zaai(project.root / "kennis", project.repo_root / BRONMAP)
+        except ZaaiGeweigerd as exc:
+            fouten += 1
+            print(f"{slug}: GEWEIGERD — {exc}", file=sys.stderr)
+            continue
+        for regel in uitkomst.regels():
+            print(f"   {slug}: {regel}")
+    return 1 if fouten else 0
+
+
 def cmd_project_bootstrap(args) -> int:
     """Zorgt dat de repositories van alle projecten lokaal bestaan.
 
@@ -588,6 +612,29 @@ def cmd_efficiency(args) -> int:
     for slug in slugs:
         print(f"\n{slug}")
         print(format_efficiency(measure(db.scope(slug), day=args.day), settings.symbol))
+    return 0
+
+
+def cmd_audit_export(args) -> int:
+    """Schrijft de audittrail van een project weg als leesbare markdown.
+
+    Een sqlite-bestand op een volume is geen archief: het is onleesbaar zonder
+    de orkestrator en het verdwijnt met de machine. Deze export is bedoeld om
+    in versiebeheer te staan, in de repository van het project zelf.
+    """
+    from .auditexport import bouw
+
+    settings = _settings()
+    db = _db(settings)
+    tekst = bouw(db.scope(args.project), args.project, symbool=settings.symbol)
+    if args.out:
+        doel = Path(args.out).expanduser()
+        doel.parent.mkdir(parents=True, exist_ok=True)
+        doel.write_text(tekst, encoding="utf-8")
+        print(f"audittrail van {args.project} geschreven naar {doel}"
+              f" ({len(tekst.splitlines())} regels)")
+    else:
+        print(tekst)
     return 0
 
 
@@ -926,6 +973,10 @@ def build_parser() -> argparse.ArgumentParser:
     ensure = project.add_parser(
         "ensure", help="ontbrekende projecten aanmaken uit $ORCH_PROJECTS")
     ensure.set_defaults(func=cmd_project_ensure)
+    seed = project.add_parser(
+        "seed", help="een lege kennisbasis eenmalig vullen uit .orchestrator/kennis")
+    seed.add_argument("project", nargs="?")
+    seed.set_defaults(func=cmd_project_seed)
 
     task = sub.add_parser("task", help="taken beheren").add_subparsers(dest="sub", required=True)
     task_add = task.add_parser("add")
@@ -1054,6 +1105,12 @@ def build_parser() -> argparse.ArgumentParser:
     eff.add_argument("project", nargs="?")
     eff.add_argument("--day")
     eff.set_defaults(func=cmd_efficiency)
+
+    ae = sub.add_parser("audit-export",
+                        help="de audittrail als leesbare markdown wegschrijven")
+    ae.add_argument("project")
+    ae.add_argument("--out", help="bestandspad; zonder dit gaat het naar stdout")
+    ae.set_defaults(func=cmd_audit_export)
 
     doctor = sub.add_parser("doctor", help="omgeving controleren")
     doctor.set_defaults(func=cmd_doctor)

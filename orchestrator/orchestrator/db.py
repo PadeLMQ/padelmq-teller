@@ -445,6 +445,21 @@ class ProjectScope:
             (self.project_id, *statuses),
         )
 
+    def all_questions(self) -> list[sqlite3.Row]:
+        """Elke vraag, ongeacht status. Voor de export: geschiedenis mag niet
+        wegvallen omdat een vraag inmiddels beantwoord is."""
+        return self._q(
+            "SELECT * FROM questions WHERE project_id = ? ORDER BY id",
+            (self.project_id,),
+        )
+
+    def all_calls(self) -> list[sqlite3.Row]:
+        """Elke betaalde aanroep met tokens en kosten, oudste eerst."""
+        return self._q(
+            "SELECT * FROM calls WHERE project_id = ? ORDER BY id",
+            (self.project_id,),
+        )
+
     def question(self, question_id: int) -> sqlite3.Row | None:
         rows = self._q(
             "SELECT * FROM questions WHERE id = ? AND project_id = ?",

@@ -90,3 +90,31 @@ bedrijfsacties (sync, import, deploy, Shopify-schrijfacties); nu ook
 destructieve shell: verwijderen, `sudo`, `git push`, geschiedenis herschrijven,
 en ingrijpen op schijf of machine. Een verificatiecommando hoort te draaien en
 een exitcode terug te geven, meer niet.
+
+## En waarom de kennis uit de projectrepository komt
+
+Een vers volume krijgt ook een lege kennisbasis. Alles wat de eigenaar ooit
+heeft bevestigd — welke checks hard zijn, wat nooit automatisch mag — zou
+daarmee weg zijn. Een orkestrator zonder die kennis stelt vragen die al
+beantwoord zijn, of kent de verboden niet.
+
+Het zaaigoed staat daarom in de repository van het project zelf, onder
+`.orchestrator/kennis/`. Dat is versiebeheerd, te corrigeren via een pull
+request, en het erft de zichtbaarheid van dat project: kennis over een
+privéproject blijft privé. `start.sh` draait `project seed` ná de kloon, want
+het zaaigoed komt uit die kloon.
+
+Drie regels, geen ervan optioneel:
+
+1. Zaaien gebeurt één keer. Daarna ligt er een merkteken en gebeurt het nooit
+   meer — ook niet na een nieuwe deploy. Zonder die grens zou elke uitrol de
+   kennis terugzetten en weken werk stil laten verdwijnen.
+2. Een bestand dat al kennis bevat wordt nooit overschreven. Het volume is de
+   werkelijkheid; het zaaigoed is alleen een beginpunt.
+3. Zaaigoed waar de geheimenscanner iets in vindt wordt in zijn geheel
+   geweigerd. Niet gedeeltelijk: half zaaien laat een kennisbasis achter
+   waarvan niemand weet wat erin zit.
+
+Daarnaast schrijft `orchestrator audit-export <project> --out <pad>` de
+audittrail weg als markdown. Een sqlite-bestand op een volume is geen archief:
+het is onleesbaar zonder de orkestrator en verdwijnt met de machine.

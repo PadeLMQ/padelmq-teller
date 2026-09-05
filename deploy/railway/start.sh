@@ -43,6 +43,11 @@ python3 -m orchestrator.cli project bootstrap || echo "   let op: niet elke repo
 # claude-cli en doctor. Faalt er iets, dan stopt het hier met een regel die
 # zegt wát er mis is. Railway herstart dan; wat je niet krijgt is een dienst
 # die "Active" heet en zwijgt.
+# Na de kloon, want het zaaigoed komt uit de projectrepository zelf. Eenmalig,
+# en nooit over bestaande kennis heen: het volume is de werkelijkheid.
+echo "== kennis =="
+python3 -m orchestrator.cli project seed || echo "   let op: zaaien is niet overal gelukt"
+
 echo "== controle vooraf =="
 python3 -m orchestrator.cli startup
 
