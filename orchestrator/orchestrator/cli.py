@@ -13,6 +13,7 @@ from . import __version__
 from .answers import answer_locally, process_answers
 from .config import Settings
 from .models import TaskStatus
+from .recovery import recover
 from .cost import CostGuard
 from .db import Database
 from .notify import ConsoleNotifier, Message, MultiNotifier
@@ -439,6 +440,14 @@ def cmd_run(args) -> int:
     if not slugs:
         print("geen projecten om te draaien")
         return 0
+
+    # Eerst opruimen wat een afgebroken run heeft achtergelaten. Zonder dit
+    # blijft een taak die midden in een fase omviel voorgoed liggen, want de
+    # wachtrij pakt alleen 'queued'.
+    for slug in slugs:
+        herstel = recover(db.scope(slug))
+        for regel in herstel.regels():
+            print(f"[{slug}] herstel: {regel}")
 
     done = 0
     for _ in range(args.max_tasks):
