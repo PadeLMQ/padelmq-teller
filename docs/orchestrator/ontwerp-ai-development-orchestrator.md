@@ -1,7 +1,7 @@
 # Universele AI Development Orchestrator — haalbaarheidsanalyse & technisch ontwerp
 
-**Versie:** 4 — alle beslissingen verwerkt op één na; de V1-kern is gebouwd.
-**Status:** ontwerp vastgesteld. De projectonafhankelijke kern staat in `orchestrator/` (§16).
+**Versie:** 5 — pilot bevestigd, coverage gemeten, Voice-architectuur toegevoegd.
+**Status:** ontwerp vastgesteld. Kern gebouwd. Pilot: **PadeLMQ/padelmq-pro**.
 **Datum:** 5 september 2026
 **Opdrachtgever:** Mathias (PadeLMQ)
 
@@ -32,7 +32,11 @@
 | **B7** | Startbudget | €5/dag globaal, €2/taak; alles instelbaar per project. |
 | — | Grondregel | **Nooit gokken.** AUTO / PARK / BLOCK met citatieplicht (§7). Een BLOCK in één project legt nooit de hele orkestrator stil. |
 
-**Nog open:** B5 — op welk project valideren we V1 als eerste (§16).
+**B5 — pilot: `PadeLMQ/padelmq-pro`.** Bevestigd. Zie §16c voor de meting.
+
+**Prioriteiten:** P0 = werkende Claude ↔ OpenAI-lus op de pilot, met AUTO/PARK/BLOCK
+en veilige verificatie. P1 = notificaties en menselijke antwoorden terug de taak in.
+P2 = spraak. P2 is nu ontworpen en de naad is gebouwd, maar blokkeert P0 niet (§16d).
 
 ---
 
@@ -610,6 +614,163 @@ Jouw pilotproject aankoppelen is één commando.
 gegevens: de datamap (`ORCH_DATA_DIR`, standaard buiten de repository) bevat de
 kennisbasis met je businessregels en hoort nooit in een publiek repo. Voordat dit in
 productie gaat, verhuist de code naar een eigen repository.
+
+---
+
+## 16c. De pilot: PadeLMQ/padelmq-pro
+
+### Waarom dit project
+
+De README opent met: *"Een verbeterde heropbouw van het PadelMQ product-dashboard… bevat
+deze versie een prijs- en voorraad-engine: automatisch stock en prijzen ophalen bij de bron
+én bij concurrenten, en automatisch herprijzen."* Next.js 14, TypeScript, SQLite.
+
+### De harde grens tijdens de pilot
+
+De orkestrator automatiseert **softwareontwikkeling**, geen bedrijfsvoering. Alleen deze
+commando's mogen automatisch draaien:
+
+| Toegestaan | Verboden |
+|---|---|
+| `npm run test` · `npm run typecheck` · `npm run build` · `npm run lint` | `npm run sync` · `daily` · `scan:priority` · `scan:stock` · `scan:urgent` · `import:shopify` · `import:oldapp` · `setup:shops` · `discover:new` · `flag:bestsellers` |
+
+Dat is niet alleen configuratie: de verboden lijst komt in `verboden.md` van het project,
+zodat de triage elke vraag die daaraan raakt nooit automatisch beantwoordt.
+
+**Gecontroleerd vóór er iets draaide:** de testsuite mockt `src/lib/shopify` in elk
+testbestand, zet `DATABASE_PATH` naar een tijdelijke map en gebruikt alleen verzonnen
+domeinen. `npm run test` raakt dus geen enkele echte winkel, prijs of voorraad.
+
+### Verificatiesterkte: sterk
+
+`test` (vitest), `typecheck` (tsc), `build` (next) en `lint` zijn alle vier aanwezig.
+214 tests slaagden op de uitgangsstand.
+
+### De coveragemeting — en wat die veranderde
+
+Mijn eerdere inschatting was gebaseerd op bestandsnamen. De echte meting corrigeerde die
+in twee richtingen.
+
+| Module | Vóór (stmts / branch) | Na | Oordeel |
+|---|---|---|---|
+| `cost.ts` | 50,0% / 45,5% | **100% / 100%** | `isBallBox` en `tiendaCost` waren volledig ongedekt — de omzetting van de Tienda-prijs naar je kostbasis |
+| `brandRules.ts` | 13,3% / 10,0% | **100% / 100%** | `brandFloor` was ongedekt — de MAP-vloer |
+| `repricing.ts` | 75,6% / 52,4% | **100% / 97,6%** | alleen `match_lowest` was gedekt; `fixed`, `percent_below`, `beat_lowest` en de uitverkocht-regel niet |
+| `brain.ts` | 82,4% / 87,5% | ongewijzigd | **beter dan ik dacht**; mijn bestandsnaam-inschatting was hier te somber |
+| `shopify.ts` | 0% | 0% | structureel: wordt in elk testbestand gemockt, dus deze suite kán hem niet dekken |
+| `stockSync.ts` | 0% | 0% | geen enkele test raakt deze module |
+
+Er staan nu 272 tests, allemaal groen. De nieuwe tests staan op branch
+`orch/tests-geldmodules`; `main` is niet aangeraakt.
+
+### Twee bevindingen, vastgelegd maar niet gerepareerd
+
+Beide zijn beslissingen, geen bugs die een model even mag oplossen:
+
+1. **De .99-afronding verlaagt ook ronde bedragen.** Een concurrent op €90 leidt tot
+   €89,99, niet €90. Bedoeld of niet — het is nu vastgelegd in een test.
+2. **De wijzigingsdrempel vergelijkt onafgeronde getallen.** `Math.abs(target -
+   currentPrice) >= 0.01` levert voor 79,99 tegen 79,98 de waarde 0,00999999999999801 op:
+   een verschil van precies één cent wordt niet gezien. Commercieel verwaarloosbaar, maar
+   de drempel is niet wat hij lijkt. Voorstel: vergelijk in hele centen.
+
+### Wat nog open staat op de pilot
+
+`shopify.ts` en `stockSync.ts` staan op nul. Dat zijn de modules die naar buiten
+schrijven. Ze fatsoenlijk testen vraagt een nagebouwde Shopify-API — een taak op zich, en
+een goede eerste échte opdracht voor de orkestrator zodra hij draait. Tot die tests er
+zijn, blijft elke wijziging daar een PR die jij leest.
+
+---
+
+## 16d. Voice Interaction — architectuur (P2)
+
+### Het uitgangspunt
+
+Spraak is **geen aparte werkstroom, maar een kanaal**. Alles wat bepaalt of een antwoord
+voldoende is, staat in één machine (`answer_session.py`); GitHub, e-mail en spraak zijn
+transportlagen eromheen. Daarom hoeft er niets herbouwd te worden wanneer spraak erbij
+komt — en daarom kan P2 nu ontworpen zijn zonder P0 op te houden.
+
+```
+BLOCK ─► vraag in de wachtrij ─► melding op je iPhone
+            │
+            ▼
+      voorlezen (TTS)  ──►  jij antwoordt  ──►  transcriptie (STT)
+                                                     │
+                                                     ▼
+                                    ┌────────────────────────────────┐
+                                    │  ONDUBBELZINNIGHEIDSPOORT      │
+                                    └───┬──────────┬──────────┬──────┘
+                            eenduidig   │   twijfel│          │ weet ik niet
+                                        ▼          ▼          ▼
+                              "ik leg vast: …   één ver-   BLOCK blijft,
+                               klopt dat?"      duidelijking  geen gok
+                                        │          │
+                                        ▼          ▼
+                                   ja ─► beslissing vastgelegd
+                                         taken hervatten
+```
+
+### De poort — deterministisch waar het kan
+
+Volgorde, en elke stap kan alleen afwijzen, nooit aanvullen:
+
+| # | Controle | Bij afwijzing |
+|---|---|---|
+| 1 | Leeg of te kort antwoord | herhalen |
+| 2 | "Weet ik niet / later" | BLOCK blijft staan, geen doorvraag |
+| 3 | Transcriptiezekerheid onder 0,75 | herhalen, langzamer |
+| 4 | **Heeft de vraag opties?** Koppel het antwoord er deterministisch aan. Precies één treffer = eenduidig; nul of meer dan één = doorvragen | doorvragen met de opties erbij |
+| 5 | Open vraag: een lezer geeft `{lezing, eenduidig, alternatieven, ontbrekend}` terug. Ontbrekend niet leeg, of meer dan één lezing = doorvragen | doorvragen |
+
+Stap 4 verdient toelichting: woorden die in **alle** opties voorkomen tellen niet mee.
+Bij "inclusief btw" tegenover "exclusief btw" is "btw" betekenisloos; alleen "inclusief"
+of "exclusief" beslist. En leestekens worden genormaliseerd, anders zou "inclusief of
+eigenlijk exclusief," als eenduidig doorgaan. Dat is geen detail: het is precies het
+geval waarin een systeem jouw twijfel als beslissing zou noteren.
+
+### Het gesprek
+
+Maximaal één verduidelijking, zoals gevraagd: vraag → antwoord → eventueel één
+verduidelijking → antwoord → bevestiging → klaar. Daarna blijft de BLOCK staan. Een
+correctie tijdens de bevestiging ("nee, exclusief") gaat opnieuw door de poort en wordt
+**nooit samengevoegd** met het vorige antwoord.
+
+De beslissing wordt pas `bevestigd` in de kennisbasis nadat jij "ja" hebt gezegd op de
+terugkoppeling. Dat is hetzelfde punt waar GitHub- en opdrachtregelantwoorden uitkomen:
+`record_human_decision`, het enige plek waar de status `bevestigd` ontstaat.
+
+### Audit spoor
+
+Elke beurt wordt vastgelegd in `answer_turns`: richting (gevraagd / geantwoord /
+verduidelijking / bevestiging / afgesloten), kanaal, tekst, transcriptiezekerheid, reden,
+tijdstip — gekoppeld aan sessie, vraag, taak en project. De oorspronkelijke vraag, jouw
+gesproken antwoord, de eventuele verduidelijking en de uiteindelijke beslissing staan dus
+alle vier terug te lezen.
+
+### Het transport — twee routes, één aanbeveling
+
+Het transport zit bewust **niet** in de kern. Het praat met precies twee handelingen:
+`next_question()` en `submit(session_id, transcript, confidence)`.
+
+| Route | Werking | Voor | Tegen |
+|---|---|---|---|
+| **Apple Shortcut** (aanbevolen) | Een Shortcut haalt de vraag op, spreekt hem uit met *Speak Text*, neemt je antwoord op met *Dictate Text*, en stuurt dat terug. Start met "Hey Siri" — handsfree met AirPods, geen app nodig. | Snelst te bouwen, geen App Store, werkt met je AirPods | *Dictate Text* geeft geen zekerheidsscore terug; controle 3 vervalt dan en de poort leunt zwaarder op de bevestigingsstap |
+| **Telegram-spraakbericht** | Je spreekt een spraakbericht in; de orkestrator transcribeert het en antwoordt met tekst of audio | Geeft wél audio en een zekerheidsscore; werkt overal | Minder handsfree: je moet de app openen |
+| *Eigen iOS-app* | — | — | **Afgewezen voor V1**: weken werk voor iets dat een Shortcut ook doet |
+
+Wat er nog gebouwd moet worden voor P2: een klein HTTP-eindpunt op de VPS met tokenauthenticatie
+(`GET /voice/next`, `POST /voice/answer`), en de keuze voor de transcriptiedienst.
+
+### Veiligheid
+
+- **Geheimen worden nooit voorgelezen.** De vraagtekst gaat door dezelfde redactie als
+  alles wat de machine verlaat — getest.
+- Het spraakeindpunt is een inkomend oppervlak op je VPS. Het token heeft hetzelfde
+  gewicht als je GitHub-token: wie het heeft, kan beslissingen namens jou vastleggen.
+- Alleen `BLOCK`-vragen worden voorgelezen. Geparkeerde vragen blijven in het dagrapport;
+  die hoef je niet in je oor.
 
 ---
 

@@ -116,13 +116,13 @@ def _requeue(scope: ProjectScope, question_id: int) -> int:
     return len(tasks)
 
 
-def answer_locally(
-    *, scope: ProjectScope, project: Project, question_id: int, answer: str
+def record_human_decision(
+    *, scope: ProjectScope, project: Project, question_id: int, answer: str, source: str
 ) -> str:
-    """Een geparkeerde vraag beantwoorden vanaf de opdrachtregel.
+    """Legt een menselijk antwoord vast als bevestigde beslissing en hervat het werk.
 
-    Zelfde regel: dit is een menselijk antwoord, dus het levert een bevestigde
-    beslissing op.
+    Dit is het enige punt waar status 'bevestigd' ontstaat. Elk kanaal — GitHub,
+    opdrachtregel, spraak — komt hier uit, zodat de regel op één plek staat.
     """
     row = scope.question(question_id)
     if row is None:
@@ -130,7 +130,7 @@ def answer_locally(
     item_id = project.knowledge.append_decision(
         title=row["text"][:80],
         body=answer,
-        source=f"antwoord op vraag #{question_id} via de opdrachtregel",
+        source=source,
         confirmed_by_human=True,
     )
     scope.set_question(
@@ -140,3 +140,17 @@ def answer_locally(
     )
     _requeue(scope, question_id)
     return item_id
+
+
+def answer_locally(
+    *, scope: ProjectScope, project: Project, question_id: int, answer: str
+) -> str:
+    """Een geparkeerde vraag beantwoorden vanaf de opdrachtregel.
+
+    Zelfde regel: dit is een menselijk antwoord, dus het levert een bevestigde
+    beslissing op.
+    """
+    return record_human_decision(
+        scope=scope, project=project, question_id=question_id, answer=answer,
+        source=f"antwoord op vraag #{question_id} via de opdrachtregel",
+    )

@@ -66,6 +66,10 @@ orchestrator secret-scan .               # staat er niets geheims in git?
 | Datamap mag nooit in een git-repo liggen | `config.py`, geweigerd door `run` en `doctor` |
 | Geheimenscan met vindbaar ontsnappingsluik (`nep-geheim`) | `secret_scan.py`, `deploy/pre-commit` |
 | Reviewer-aanroep valideren zonder stille terugval | `validate_reviewer.py` |
+| Eén antwoordmachine voor alle kanalen (GitHub, opdrachtregel, spraak) | `answer_session.py` |
+| Ondubbelzinnigheidspoort: nooit aanvullen, nooit raden | `answer_session.py` |
+| `bevestigd` ontstaat op één plek | `answers.record_human_decision` |
+| Volledig audit spoor per gesprek | `db.py` (`answer_turns`) |
 | Verificatie vaststellen op wat er werkelijk draait | `inspect.py` |
 
 ## Tests
@@ -74,7 +78,7 @@ orchestrator secret-scan .               # staat er niets geheims in git?
 python3 -m unittest discover -s tests -t .
 ```
 
-96 tests, geen externe afhankelijkheden nodig behalve PyYAML en `git`. De lus
+117 tests, geen externe afhankelijkheden nodig behalve PyYAML en `git`. De lus
 wordt end-to-end getest met een echte git-repository en echte
 verificatiecommando's; alleen de modellen zijn nepobjecten.
 
@@ -86,6 +90,17 @@ verificatiecommando's; alleen de modellen zijn nepobjecten.
 | Reviewer-aanroep | `orchestrator verify-reviewer --offline` controleert de SDK-handtekening zonder netwerk of kosten. De online trap (één minimale echte aanroep) moet nog gedraaid worden vóór de eerste productierun; bij afwijking stopt hij in plaats van terug te vallen. |
 | Parallelle projecten | V1 draait sequentieel; dat is doorvoer, geen functionaliteit. |
 | Auto-merge | Alleen als schakelaar in `project.yaml`, standaard uit, niet geïmplementeerd. |
+
+## Spraak (P2) — de naad is er, het transport nog niet
+
+`voice/` levert precies twee handelingen voor een transport: `next_question()` en
+`submit(session_id, transcript, confidence)`. Alles wat bepaalt of een antwoord
+voldoende is, zit in `answer_session.py` en is gedeeld met de andere kanalen — er
+hoeft dus niets herbouwd te worden als spraak erbij komt.
+
+Nog te bouwen: het HTTP-eindpunt op de VPS (`GET /voice/next`, `POST /voice/answer`)
+met tokenauthenticatie, en de keuze voor de transcriptiedienst. Zie §16d van het
+ontwerp voor de twee transportroutes.
 
 ## De code naar een eigen private repository
 

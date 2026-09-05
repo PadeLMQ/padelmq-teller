@@ -101,6 +101,35 @@ CREATE TABLE IF NOT EXISTS events (
 );
 CREATE INDEX IF NOT EXISTS ix_events_project ON events(project_id, ts);
 
+CREATE TABLE IF NOT EXISTS answer_sessions (
+    id             INTEGER PRIMARY KEY,
+    project_id     INTEGER NOT NULL REFERENCES projects(id),
+    question_id    INTEGER NOT NULL,
+    task_id        INTEGER,
+    channel        TEXT NOT NULL,
+    state          TEXT NOT NULL,
+    clarifications INTEGER NOT NULL DEFAULT 0,
+    interpretation TEXT,
+    decision_id    TEXT,
+    created_at     TEXT NOT NULL,
+    updated_at     TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS ix_sessions_project ON answer_sessions(project_id, state);
+
+-- Volledig audit spoor: elke beurt in het gesprek, ongeacht het kanaal.
+CREATE TABLE IF NOT EXISTS answer_turns (
+    id          INTEGER PRIMARY KEY,
+    project_id  INTEGER NOT NULL REFERENCES projects(id),
+    session_id  INTEGER NOT NULL,
+    ts          TEXT NOT NULL,
+    direction   TEXT NOT NULL,   -- gevraagd | geantwoord | verduidelijking | bevestiging | afgesloten
+    channel     TEXT NOT NULL,
+    text        TEXT NOT NULL,
+    confidence  REAL,
+    note        TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX IF NOT EXISTS ix_turns_session ON answer_turns(session_id, id);
+
 CREATE TABLE IF NOT EXISTS signatures (
     id          INTEGER PRIMARY KEY,
     project_id  INTEGER NOT NULL REFERENCES projects(id),
@@ -405,6 +434,61 @@ class ProjectScope:
         return self._q(
             "SELECT * FROM events WHERE project_id = ? ORDER BY id DESC LIMIT ?",
             (self.project_id, limit),
+        )
+
+    # -- antwoordsessies en audit spoor ----------------------------------
+    def start_answer_session(
+        self, question_id: int, channel: str, task_id: int | None = None
+    ) -> int:
+        stamp = now()
+        cur = self.conn.execute(
+            "INSERT INTO answer_sessions (project_id, question_id, task_id, channel,"
+            " state, created_at, updated_at) VALUES (?,?,?,?,?,?,?)",
+            (self.project_id, question_id, task_id, channel, "asked", stamp, stamp),
+        )
+        return int(cur.lastrowid)
+
+    def answer_session(self, session_id: int) -> sqlite3.Row | None:
+        rows = self._q(
+            "SELECT * FROM answer_sessions WHERE id = ? AND project_id = ?",
+            (session_id, self.project_id),
+        )
+        return rows[0] if rows else None
+
+    def open_answer_session(self, question_id: int) -> sqlite3.Row | None:
+        rows = self._q(
+            "SELECT * FROM answer_sessions WHERE project_id = ? AND question_id = ?"
+            " AND state NOT IN ('resolved', 'returned_to_block') ORDER BY id DESC LIMIT 1",
+            (self.project_id, question_id),
+        )
+        return rows[0] if rows else None
+
+    def set_answer_session(self, session_id: int, **fields: Any) -> None:
+        allowed = {"state", "clarifications", "interpretation", "decision_id"}
+        unknown = set(fields) - allowed
+        if unknown:
+            raise ValueError(f"onbekende sessievelden: {sorted(unknown)}")
+        sets = ", ".join(f"{k} = ?" for k in fields)
+        self.conn.execute(
+            f"UPDATE answer_sessions SET {sets}, updated_at = ?"
+            " WHERE id = ? AND project_id = ?",
+            (*fields.values(), now(), session_id, self.project_id),
+        )
+
+    def add_turn(
+        self, session_id: int, direction: str, channel: str, text: str,
+        confidence: float | None = None, note: str = "",
+    ) -> None:
+        self.conn.execute(
+            "INSERT INTO answer_turns (project_id, session_id, ts, direction, channel,"
+            " text, confidence, note) VALUES (?,?,?,?,?,?,?,?)",
+            (self.project_id, session_id, now(), direction, channel, text, confidence, note),
+        )
+
+    def turns(self, session_id: int) -> list[sqlite3.Row]:
+        return self._q(
+            "SELECT * FROM answer_turns WHERE project_id = ? AND session_id = ? ORDER BY id",
+            (self.project_id, session_id),
         )
 
     # -- geen-vooruitgang-detector ---------------------------------------
