@@ -7,6 +7,7 @@ uitslag niet wijzigen.
 
 from __future__ import annotations
 
+import hashlib
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -79,6 +80,29 @@ class Runner:
 
     def _knowledge_context(self) -> str:
         return self.project.knowledge.as_prompt_context()
+
+    def _log_context(self, task_id: int, fase: str, context: str, extra: dict) -> None:
+        """Legt vast wat de reviewer precies te zien kreeg.
+
+        Niet de volle tekst — wel welke kennisitems erin zaten, met hun status,
+        plus een hash en de omvang. Zo is achteraf exact na te gaan waarop een
+        AUTO-antwoord gebaseerd kon zijn, zonder het logboek vol te schrijven.
+        """
+        items = self.project.knowledge.load()
+        self._log(
+            "reviewer-context",
+            task_id=task_id,
+            fase=fase,
+            kennisitems=[
+                {"id": i.item_id, "status": i.status.value, "bestand": i.file}
+                for i in sorted(items.values(), key=lambda x: x.item_id)
+            ],
+            aantal_items=len(items),
+            bevestigd=sum(1 for i in items.values() if i.citable),
+            context_tekens=len(context),
+            context_sha256=hashlib.sha256(context.encode("utf-8")).hexdigest(),
+            **extra,
+        )
 
     def _triage_engine(self, task_id: int, verification: VerificationResult | None) -> TriageEngine:
         return TriageEngine(
@@ -232,6 +256,16 @@ class Runner:
                              task_id=task_id, run_id=run_id)
                 if execution.session_id:
                     self.scope.set_task(task_id, claude_session_id=execution.session_id)
+                self._log(
+                    "uitvoering", task_id=task_id,
+                    samenvatting=execution.summary,
+                    sessie=execution.session_id,
+                    open_vragen=[q.text for q in execution.open_questions],
+                    aannames=execution.assumptions_made,
+                    alternatief=execution.alternative.proposal or None,
+                    aanbeveling=execution.alternative.recommendation,
+                    prompt_tekens=len(prompt),
+                )
 
                 # 2b · deterministische controles op wat er terugkomt
                 blocked = self._guard_phase(task_id, execution, worktree, task, baseline)
@@ -248,8 +282,16 @@ class Runner:
                 # 3 · verifiëren
                 self.scope.set_task(task_id, status=TaskStatus.VERIFYING.value)
                 verification = self.verifier.run(worktree.path, self.project.checks)
-                self._log("verificatie", task_id=task_id, ok=verification.ok,
-                          failed=[c.name for c in verification.failed])
+                self._log(
+                    "verificatie", task_id=task_id, ok=verification.ok,
+                    checks=[
+                        {"naam": c.name, "commando": c.command, "exitcode": c.exit_code,
+                         "geslaagd": c.ok}
+                        for c in verification.checks
+                    ],
+                    gefaald=[c.name for c in verification.failed],
+                    poging=(task["iterations"] or 0) + 1,
+                )
                 if self.project.checks and not verification.ok:
                     signature = verification.signature()
                     if self.no_progress.stuck(signature) or self.scope.seen_signature(
@@ -304,9 +346,13 @@ class Runner:
         if self.reviewer is not None and self.project.reviewer_enabled:
             task = self.scope.task(task_id)
             self._preflight(self.settings.reviewer_model, task_id, run_id, 12000, 3000)
+            context = redact_text(self._knowledge_context(), self.project.redact_patterns)
+            self._log_context(task_id, "beantwoorden", context, {
+                "vragen": [q.text for q in pending],
+            })
             result = self.reviewer.answer(
                 questions=pending,
-                context=redact_text(self._knowledge_context(), self.project.redact_patterns),
+                context=context,
                 previous_response_id=task["reviewer_response_id"] if task else None,
             )
             self._charge(result.usage, phase="answer", role="beantwoorder",
@@ -319,8 +365,14 @@ class Runner:
         answered: list[Question] = []
         for question in candidates:
             decision = engine.decide(question)
-            self._log("triage", task_id=task_id, outcome=decision.outcome.value,
-                      question=question.text, reason=decision.reason)
+            self._log(
+                "triage", task_id=task_id, outcome=decision.outcome.value,
+                question=question.text, reason=decision.reason,
+                bronnen=decision.resolved_citations,
+                aangeboden_bronnen=[c.raw for c in question.citations],
+                antwoord=decision.answer,
+                categorie=question.category,
+            )
             if decision.outcome is Triage.AUTO:
                 question.proposed_answer = decision.answer
                 answered.append(question)
@@ -390,11 +442,18 @@ class Runner:
         review: ReviewResult | None = None
         if self.reviewer is not None and self.project.reviewer_enabled:
             self._preflight(self.settings.reviewer_model, task_id, run_id, 25000, 4000)
+            diff = redact_diff(worktree.uncommitted_diff(), self.project.redact_patterns)
+            context = redact_text(self._knowledge_context(), self.project.redact_patterns)
+            self._log_context(task_id, "beoordelen", context, {
+                "diff_tekens": len(diff),
+                "verificatie_samenvatting": summary,
+                "acceptatiecriteria": acceptance,
+            })
             review = self.reviewer.review(
-                diff=redact_diff(worktree.uncommitted_diff(), self.project.redact_patterns),
+                diff=diff,
                 verification_summary=summary,
                 acceptance=acceptance,
-                context=redact_text(self._knowledge_context(), self.project.redact_patterns),
+                context=context,
                 previous_response_id=task["reviewer_response_id"],
             )
             self._charge(review.usage, phase="review", role="beoordelaar",
@@ -404,6 +463,18 @@ class Runner:
             if before is not review.verdict:
                 self._log("reviewerfout", task_id=task_id, van=before.value,
                           naar=review.verdict.value)
+            self._log(
+                "beoordeling", task_id=task_id, verdict=review.verdict.value,
+                bevindingen=[
+                    {"ernst": f.severity, "bestand": f.file, "punt": f.issue}
+                    for f in review.findings
+                ],
+                criteria_gehaald=review.acceptance_met,
+                criteria_open=review.acceptance_missing,
+                alternatief=review.alternative.proposal or None,
+                aanbeveling=review.alternative.recommendation,
+                instructie=review.next_instruction or None,
+            )
             if review.response_id:
                 self.scope.set_task(task_id, reviewer_response_id=review.response_id)
 
@@ -432,11 +503,12 @@ class Runner:
         # pass (of geen reviewer): committen mag, want de verificatie is groen
         self.scope.set_task(task_id, status=TaskStatus.COMMITTING.value)
         try:
-            self.git.commit(
+            sha = self.git.commit(
                 worktree,
                 self._commit_message(task, verification),
                 "orchestrator <bot@padelmq.be>",
             )
+            self._log("commit", task_id=task_id, sha=sha, branch=worktree.branch)
         except GitError as exc:
             self.scope.set_task(task_id, status=TaskStatus.FAILED.value)
             self.scope.end_run(run_id, "commit_mislukt")

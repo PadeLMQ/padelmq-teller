@@ -437,6 +437,18 @@ def cmd_voice_serve(args) -> int:
     return 0
 
 
+
+def cmd_report(args) -> int:
+    from .runreport import build_report, format_report
+
+    settings = _settings()
+    db = _db(settings)
+    project = projects_mod.load(settings, args.project)
+    rapport = build_report(db.scope(args.project), project, args.task_id)
+    print(rapport.as_json() if args.json else format_report(rapport))
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orchestrator", description=__doc__)
     parser.add_argument("--version", action="version", version=__version__)
@@ -539,6 +551,12 @@ def build_parser() -> argparse.ArgumentParser:
     voice.add_argument("--port", type=int, default=None, help="standaard 8765")
     voice.add_argument("--per-minuut", type=int, default=60, dest="per_minuut")
     voice.set_defaults(func=cmd_voice_serve)
+
+    report = sub.add_parser("report", help="het eindrapport van een taak")
+    report.add_argument("project")
+    report.add_argument("task_id", type=int)
+    report.add_argument("--json", action="store_true")
+    report.set_defaults(func=cmd_report)
 
     doctor = sub.add_parser("doctor", help="omgeving controleren")
     doctor.set_defaults(func=cmd_doctor)

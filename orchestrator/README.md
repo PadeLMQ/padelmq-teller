@@ -39,7 +39,10 @@ orchestrator task add mijnapp "Voeg endpoint X toe" \
 orchestrator run mijnapp
 ```
 
-Verder: `questions`, `question-add`, `answer`, `poll-answers`, `digest`, `costs`, `pause`.
+Verder: `report`, `questions`, `question-add`, `answer`, `poll-answers`, `digest`, `costs`, `pause`, `inspect`, `verify-reviewer`, `secret-scan`, `voice-serve`.
+
+Het draaiboek voor de eerste echte lus staat in
+[`docs/orchestrator/p0-startdraaiboek.md`](../docs/orchestrator/p0-startdraaiboek.md).
 
 ### Voordat je aankoppelt
 
@@ -79,7 +82,7 @@ orchestrator secret-scan .               # staat er niets geheims in git?
 python3 -m unittest discover -s tests -t .
 ```
 
-146 tests, geen externe afhankelijkheden nodig behalve PyYAML en `git`. De lus
+151 tests, geen externe afhankelijkheden nodig behalve PyYAML en `git`. De lus
 wordt end-to-end getest met een echte git-repository en echte
 verificatiecommando's; alleen de modellen zijn nepobjecten.
 

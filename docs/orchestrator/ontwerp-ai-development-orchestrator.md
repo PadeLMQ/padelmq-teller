@@ -1,6 +1,6 @@
 # Universele AI Development Orchestrator — haalbaarheidsanalyse & technisch ontwerp
 
-**Versie:** 7 — spraakeindpunt gebouwd; P2 is werkend zonder P0 op te houden.
+**Versie:** 8 — P0 is startklaar; alleen de OpenAI-sleutel ontbreekt nog.
 **Status:** ontwerp vastgesteld. Kern gebouwd. Pilot: **PadeLMQ/padelmq-pro**.
 **Datum:** 5 september 2026
 **Opdrachtgever:** Mathias (PadeLMQ)
@@ -33,6 +33,11 @@
 | — | Grondregel | **Nooit gokken.** AUTO / PARK / BLOCK met citatieplicht (§7). Een BLOCK in één project legt nooit de hele orkestrator stil. |
 
 **B5 — pilot: `PadeLMQ/padelmq-pro`.** Bevestigd. Zie §16c voor de meting.
+
+**Startklaar.** Het volledige draaiboek voor de eerste echte lus — de volgorde, de
+pilottaak, en wat het eindrapport toont — staat in
+[`p0-startdraaiboek.md`](p0-startdraaiboek.md). Er ontbreekt nog één ding: de
+OpenAI-sleutel.
 
 **Prioriteiten:** P0 = werkende Claude ↔ OpenAI-lus op de pilot, met AUTO/PARK/BLOCK
 en veilige verificatie. P1 = notificaties en menselijke antwoorden terug de taak in.
@@ -843,6 +848,12 @@ wilt.
 | Kosten per afgeronde taak, per project, per model | Of het economisch klopt (B1) |
 | Aandeel taken dat groen wordt zonder reviewronde | Wat de beoordelaarsrol toevoegt |
 | Aandeel voorgestelde alternatieven dat jij overneemt | Of de verplichte tegenspraak waarde levert (§9) |
+
+Per taak levert `orchestrator report <project> <taak-id>` bovendien het volledige
+runrapport met de twaalf afgesproken punten, waaronder — punt 4 — precies welke
+kennisitems met welke status aan de reviewer beschikbaar waren, met een sha256 van de
+exacte context. Dat is het verschil tussen "de reviewer had context" en aantoonbaar
+wéten waarop een automatisch antwoord gebaseerd kon zijn.
 
 ---
 
