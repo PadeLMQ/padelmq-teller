@@ -13,7 +13,7 @@ import yaml
 from .config import Settings
 from .knowledge import KnowledgeStore
 from .models import VerificationStrength
-from .verify import infer_strength
+from .verify import assert_safe_checks, infer_strength
 
 
 class ProjectError(RuntimeError):
@@ -127,6 +127,7 @@ def add(
     if (root / "project.yaml").exists():
         raise ProjectError(f"project {slug!r} bestaat al")
     checks = checks or {}
+    assert_safe_checks(checks)  # weiger meteen bij het toevoegen, niet pas bij de eerste run
     project = Project(
         slug=slug,
         repo=repo,

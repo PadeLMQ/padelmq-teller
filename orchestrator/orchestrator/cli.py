@@ -377,6 +377,32 @@ def cmd_secret_scan(args) -> int:
     return 1 if hits else 0
 
 
+
+def cmd_question_add(args) -> int:
+    """Een openstaande beslissing registreren zonder dat de lus draait.
+
+    Zo kunnen bevindingen uit een codebeoordeling in dezelfde wachtrij komen
+    als de vragen die de orkestrator zelf stelt.
+    """
+    settings = _settings()
+    # Het project moet bestaan: een typefout mag geen spookproject aanmaken
+    # waarin vragen onvindbaar verdwijnen.
+    projects_mod.load(settings, args.project)
+    db = _db(settings)
+    scope = db.scope(args.project)
+    question_id = scope.add_question(
+        text=args.text,
+        outcome=args.outcome,
+        fingerprint=" ".join(args.text.lower().split()),
+        why_blocking=args.why or "",
+        options=args.option or [],
+        proposed=args.proposed,
+        category=args.category,
+    )
+    print(f"vraag #{question_id} geregistreerd in {args.project} als {args.outcome}")
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orchestrator", description=__doc__)
     parser.add_argument("--version", action="version", version=__version__)
@@ -406,6 +432,16 @@ def build_parser() -> argparse.ArgumentParser:
     task_list = task.add_parser("list")
     task_list.add_argument("project", nargs="?")
     task_list.set_defaults(func=cmd_task_list)
+
+    qadd = sub.add_parser("question-add", help="een openstaande beslissing registreren")
+    qadd.add_argument("project")
+    qadd.add_argument("text")
+    qadd.add_argument("--outcome", choices=["park", "block"], default="park")
+    qadd.add_argument("--why", default="")
+    qadd.add_argument("--option", action="append")
+    qadd.add_argument("--proposed")
+    qadd.add_argument("--category")
+    qadd.set_defaults(func=cmd_question_add)
 
     questions = sub.add_parser("questions", help="openstaande vragen tonen")
     questions.add_argument("project", nargs="?")

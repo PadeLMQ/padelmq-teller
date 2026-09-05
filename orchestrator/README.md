@@ -39,7 +39,7 @@ orchestrator task add mijnapp "Voeg endpoint X toe" \
 orchestrator run mijnapp
 ```
 
-Verder: `questions`, `answer`, `poll-answers`, `digest`, `costs`, `pause`.
+Verder: `questions`, `question-add`, `answer`, `poll-answers`, `digest`, `costs`, `pause`.
 
 ### Voordat je aankoppelt
 
@@ -64,6 +64,7 @@ orchestrator secret-scan .               # staat er niets geheims in git?
 | Projectisolatie via verplichte `project_id` | `db.py` |
 | Noodstop | `config.py`, `orchestrator pause` |
 | Datamap mag nooit in een git-repo liggen | `config.py`, geweigerd door `run` en `doctor` |
+| **Verboden commando's kunnen niet als verificatie draaien** | `verify.assert_safe_checks` — de poort zit in de uitvoerder, niet in de configuratie |
 | Geheimenscan met vindbaar ontsnappingsluik (`nep-geheim`) | `secret_scan.py`, `deploy/pre-commit` |
 | Reviewer-aanroep valideren zonder stille terugval | `validate_reviewer.py` |
 | Eén antwoordmachine voor alle kanalen (GitHub, opdrachtregel, spraak) | `answer_session.py` |
@@ -78,7 +79,7 @@ orchestrator secret-scan .               # staat er niets geheims in git?
 python3 -m unittest discover -s tests -t .
 ```
 
-117 tests, geen externe afhankelijkheden nodig behalve PyYAML en `git`. De lus
+129 tests, geen externe afhankelijkheden nodig behalve PyYAML en `git`. De lus
 wordt end-to-end getest met een echte git-repository en echte
 verificatiecommando's; alleen de modellen zijn nepobjecten.
 

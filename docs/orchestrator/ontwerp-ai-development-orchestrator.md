@@ -1,6 +1,6 @@
 # Universele AI Development Orchestrator — haalbaarheidsanalyse & technisch ontwerp
 
-**Versie:** 5 — pilot bevestigd, coverage gemeten, Voice-architectuur toegevoegd.
+**Versie:** 6 — schrijfpad naar Shopify getest, verboden-commandopoort gebouwd.
 **Status:** ontwerp vastgesteld. Kern gebouwd. Pilot: **PadeLMQ/padelmq-pro**.
 **Datum:** 5 september 2026
 **Opdrachtgever:** Mathias (PadeLMQ)
@@ -657,8 +657,8 @@ in twee richtingen.
 | `brandRules.ts` | 13,3% / 10,0% | **100% / 100%** | `brandFloor` was ongedekt — de MAP-vloer |
 | `repricing.ts` | 75,6% / 52,4% | **100% / 97,6%** | alleen `match_lowest` was gedekt; `fixed`, `percent_below`, `beat_lowest` en de uitverkocht-regel niet |
 | `brain.ts` | 82,4% / 87,5% | ongewijzigd | **beter dan ik dacht**; mijn bestandsnaam-inschatting was hier te somber |
-| `shopify.ts` | 0% | 0% | structureel: wordt in elk testbestand gemockt, dus deze suite kán hem niet dekken |
-| `stockSync.ts` | 0% | 0% | geen enkele test raakt deze module |
+| `shopify.ts` | 0% / 0% | **95,8% / 77,0%** | het externe schrijfpad; nu getest tegen een nagebouwde Admin-API op fetch-niveau |
+| `stockSync.ts` | 0% / 0% | **79,2% / 74,4%** | de voorraadsync; de veiligheidsgaranties uit de kop van de module zijn nu bewezen |
 
 Er staan nu 272 tests, allemaal groen. De nieuwe tests staan op branch
 `orch/tests-geldmodules`; `main` is niet aangeraakt.
@@ -674,12 +674,51 @@ Beide zijn beslissingen, geen bugs die een model even mag oplossen:
    een verschil van precies één cent wordt niet gezien. Commercieel verwaarloosbaar, maar
    de drempel is niet wat hij lijkt. Voorstel: vergelijk in hele centen.
 
-### Wat nog open staat op de pilot
+### Het schrijfpad naar Shopify
 
-`shopify.ts` en `stockSync.ts` staan op nul. Dat zijn de modules die naar buiten
-schrijven. Ze fatsoenlijk testen vraagt een nagebouwde Shopify-API — een taak op zich, en
-een goede eerste échte opdracht voor de orkestrator zodra hij draait. Tot die tests er
-zijn, blijft elke wijziging daar een PR die jij leest.
+Twee pull requests, beide alleen tests, geen productiecode:
+
+| PR | Inhoud |
+|---|---|
+| [#1](https://github.com/PadeLMQ/padelmq-pro/pull/1) `orch/tests-geldmodules` | `cost.ts`, `brandRules.ts`, `repricing.ts` |
+| [#2](https://github.com/PadeLMQ/padelmq-pro/pull/2) `orch/tests-shopify-schrijfpad` | de Shopify-fake, `shopify.ts`, `stockSync.ts` |
+
+**De fake werkt op fetch-niveau, niet op moduleniveau.** Zo draait de echte client mee —
+inclusief authenticatie, tokenvernieuwing en foutafhandeling. Een mock van de module zelf
+zou juist die code overslaan, en dat is precies de code die nergens getest was. De fake
+weigert elk verzoek naar een andere host dan de verzonnen testwinkel: een echte aanroep
+laat de test falen in plaats van er stil doorheen te glippen.
+
+Wat er nu bewezen is voor `stockSync.ts`: alleen de Spanje-locatie wordt geraakt en
+Kampenhout en ShopWeDo blijven staan; de dubbele poort (`live` én `ENABLE_STOCK_WRITE`,
+en een andere waarde dan `"true"` telt niet); geen write bij een onbetrouwbare bron, bij
+`próximamente`, bij een niet ondubbelzinnig gekoppelde maat of wanneer de tweede
+bronmeting afwijkt; compare-and-swap die écht weigert als iemand er tussendoor schreef;
+alarm wanneer de na-verificatie niet klopt; herhaalbaarheid; en een circuit breaker die
+de hele ronde afbreekt zonder te schrijven.
+
+`startStockSyncLoop()` blijft bewust ongetest: die start een echte tijdlijn en bewijst
+weinig. De functie die hij aanroept is wel gedekt.
+
+### De verboden-commandopoort
+
+De afspraak "alleen veilige verificatie" staat niet alleen in de configuratie maar in de
+**uitvoerder zelf** (`verify.assert_safe_checks`). Er is geen codepad waarlangs een
+verboden commando alsnog gedraaid kan worden, ook niet met een gewijzigde `project.yaml`.
+
+Geweigerd: `sync`, `daily`, `scan:*`, `import:*`, `setup:*`, `seed`, `migrate`,
+`discover:*`, `flag:*`, `publish`, `deploy`, `release`, elke `--live`/`--push`/`--apply`-vlag,
+`ENABLE_STOCK_WRITE=true`, `STOCK_SYNC_UP_ENABLED=true`, rechtstreekse
+`myshopify.com`-aanroepen en `curl`/`wget` vanuit een check. Toegestaan blijven `test`,
+`typecheck`, `lint` en `build`. Een project met een verboden check kan niet eens
+toegevoegd worden.
+
+### Openstaande beslissingen
+
+De twee pricing-bevindingen zijn **niet** gewijzigd en staan vastgelegd in
+[`openstaande-beslissingen-padelmq-pro.md`](openstaande-beslissingen-padelmq-pro.md),
+met het commando om ze als geparkeerde vraag in de wachtrij te zetten zodra de datamap is
+ingericht (`orchestrator question-add`).
 
 ---
 
