@@ -36,6 +36,13 @@ class Project:
     branch_prefix: str = "orch/"
     github_repo: str = ""             # "eigenaar/repo" voor issues en PR's
     notify: list[str] = field(default_factory=lambda: ["email", "github"])
+    # Bestanden die een verificatiecommando zelf herschrijft en die nooit bij de
+    # taak horen. Bewust een expliciete lijst en geen brede opruiming: alles
+    # terugzetten wat tijdens de verificatie wijzigt, zou echt werk kunnen
+    # wissen als een check ooit iets nuttigs genereert.
+    verification_artifacts: list[str] = field(
+        default_factory=lambda: ["next-env.d.ts"]
+    )
 
     @property
     def knowledge(self) -> KnowledgeStore:
@@ -60,6 +67,7 @@ class Project:
                 "redact_patterns": self.redact_patterns,
                 "auto_merge": self.auto_merge,
                 "branch_prefix": self.branch_prefix,
+                "verification_artifacts": self.verification_artifacts,
                 "notify": self.notify,
             },
             sort_keys=False,
@@ -99,6 +107,9 @@ def load(settings: Settings, slug: str) -> Project:
         reviewer_enabled=bool(raw.get("reviewer_enabled", True)),
         redact_patterns=list(raw.get("redact_patterns") or []),
         auto_merge=bool(raw.get("auto_merge", False)),
+        verification_artifacts=list(
+            raw.get("verification_artifacts") or ["next-env.d.ts"]
+        ),
         branch_prefix=raw.get("branch_prefix", "orch/"),
         notify=list(raw.get("notify") or ["email", "github"]),
     )

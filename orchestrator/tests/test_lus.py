@@ -322,21 +322,25 @@ class Hervatten(Lus):
                   if r["kind"] == "verificatie-onuitvoerbaar"]
         self.assertTrue(events, "de onuitvoerbare verificatie is niet vastgelegd")
 
-    def test_verificatie_ruimt_haar_eigen_rommel_op(self):
-        """Een check die een gevolgd bestand schrijft, mag de taakdiff niet vervuilen.
+    def _build_met_artefact(self, artefacten, check, steps):
+        runner = self.build(checks={"tests": check}, steps=steps)
+        self.project.verification_artifacts = artefacten
+        return runner
+
+    def test_bekend_verificatie_artefact_wordt_teruggezet(self):
+        """Een check die een gevolgd bestand herschrijft, mag de taakdiff niet vervuilen.
 
         Dit gebeurde echt: npm run build schreef next-env.d.ts terug, die
         wijziging belandde in de diff en de beoordelaar vroeg terecht om
         herstel van een ongerelateerde wijziging.
         """
-        # De check gedraagt zich als een build: hij schrijft in een bestand dat
-        # al in de repo staat, en slaagt.
         check = (
             "python3 -c \"import pathlib; "
             "pathlib.Path('app.py').write_text('# door de build aangeraakt\\n')\""
         )
-        runner = self.build(checks={"tests": check},
-                            steps=[{"write": {"nieuw.py": "x = 1\n"}}])
+        runner = self._build_met_artefact(
+            ["app.py"], check, [{"write": {"nieuw.py": "x = 1\n"}}]
+        )
         task_id = self.task(runner)
         outcome = runner.run_task(task_id)
 
@@ -344,12 +348,40 @@ class Hervatten(Lus):
         worktree_pad = self.tmp / "worktrees" / f"orch_{task_id}"
         self.assertNotIn(
             "app.py", run_git(worktree_pad, "diff", "--name-only", "main"),
-            "de wijziging van de check staat nog in de taakdiff",
+            "het bekende artefact staat nog in de taakdiff",
         )
         events = [r for r in self.scope.events(limit=50)
                   if r["kind"] == "verificatie-rommel"]
         self.assertTrue(events, "het opruimen is niet vastgelegd")
-        self.assertIn("app.py", json.loads(events[0]["payload"])["bestanden"])
+        self.assertIn("app.py", json.loads(events[0]["payload"])["opgeruimd"])
+
+    def test_onbekende_wijziging_blijft_staan_en_wordt_gemeld(self):
+        """Geen brede opruiming: wat niet als artefact bekendstaat, blijft.
+
+        Alles terugzetten wat tijdens de verificatie wijzigt zou echt werk
+        kunnen wissen als een check ooit iets nuttigs genereert.
+        """
+        check = (
+            "python3 -c \"import pathlib; "
+            "pathlib.Path('app.py').write_text('# onverwacht gewijzigd\\n')\""
+        )
+        runner = self._build_met_artefact(
+            ["next-env.d.ts"], check, [{"write": {"nieuw.py": "x = 1\n"}}]
+        )
+        task_id = self.task(runner)
+        runner.run_task(task_id)
+
+        events = [r for r in self.scope.events(limit=50)
+                  if r["kind"] == "verificatie-rommel"]
+        self.assertTrue(events, "de onbekende wijziging is niet gemeld")
+        payload = json.loads(events[0]["payload"])
+        self.assertEqual(payload["opgeruimd"], [])
+        self.assertIn("app.py", payload["onbekend"])
+        worktree_pad = self.tmp / "worktrees" / f"orch_{task_id}"
+        self.assertIn(
+            "app.py", run_git(worktree_pad, "diff", "--name-only", "main"),
+            "de onbekende wijziging is weggegooid; dat mag niet",
+        )
 
     def test_reviewerfeedback_bereikt_de_volgende_ronde(self):
         """Zonder dit krijgt de uitvoerder dezelfde prompt en verandert er niets."""

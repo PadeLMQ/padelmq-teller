@@ -280,6 +280,21 @@ def _reviewer_auth_status() -> tuple[bool, str]:
     aantal = len(getattr(modellen, "data", []) or [])
     return True, f"OK via {bron} ({aantal} modellen zichtbaar, gratis eindpunt)"
 
+def cmd_efficiency(args) -> int:
+    from .efficiency import format_efficiency, measure
+
+    settings = _settings()
+    db = _db(settings)
+    slugs = [args.project] if args.project else projects_mod.list_projects(settings)
+    if not slugs:
+        print("geen projecten")
+        return 0
+    for slug in slugs:
+        print(f"\n{slug}")
+        print(format_efficiency(measure(db.scope(slug), day=args.day), settings.symbol))
+    return 0
+
+
 def cmd_doctor(args) -> int:
     settings = _settings()
     print(f"orchestrator {__version__}")
@@ -448,6 +463,15 @@ def cmd_run(args) -> int:
                 # afsluiten, zodat 'task requeue' hem terug in de wachtrij zet.
                 scope.log("run-gecrasht", {"fout": f"{type(exc).__name__}: {exc}"},
                           task_id=task["id"])
+                # Het geld van deze run is uitgegeven zonder resultaat. Zonder
+                # markering verdwijnt dat in het totaal.
+                open_run = scope.open_run(task["id"])
+                if open_run is not None:
+                    aantal = scope.mark_run_wasted(
+                        open_run, f"run afgebroken: {type(exc).__name__}")
+                    scope.end_run(open_run, "gecrasht")
+                    if aantal:
+                        print(f"  {aantal} aanroep(en) gemarkeerd als verspild")
                 scope.set_task(task["id"], status=TaskStatus.FAILED.value)
                 print(f"[{slug}] taak {task['id']} gecrasht: {type(exc).__name__}: {exc}")
                 print(f"  terug in de wachtrij zetten: orchestrator task requeue {slug} {task['id']}")
@@ -689,6 +713,11 @@ def build_parser() -> argparse.ArgumentParser:
     requeue.add_argument("project")
     requeue.add_argument("id", type=int)
     requeue.set_defaults(func=cmd_task_requeue)
+
+    eff = sub.add_parser("efficiency", help="nuttige tegenover verspilde AI-kosten")
+    eff.add_argument("project", nargs="?")
+    eff.add_argument("--day")
+    eff.set_defaults(func=cmd_efficiency)
 
     doctor = sub.add_parser("doctor", help="omgeving controleren")
     doctor.set_defaults(func=cmd_doctor)

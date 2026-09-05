@@ -87,6 +87,7 @@ CREATE TABLE IF NOT EXISTS calls (
     tokens_out    INTEGER NOT NULL DEFAULT 0,
     cached_in     INTEGER NOT NULL DEFAULT 0,
     cost_eur      REAL NOT NULL DEFAULT 0,
+    wasted_reason TEXT,
     day           TEXT NOT NULL,
     created_at    TEXT NOT NULL
 );
@@ -211,6 +212,9 @@ class Database:
         }
         if "review_feedback" not in bestaand:
             self.conn.execute("ALTER TABLE tasks ADD COLUMN review_feedback TEXT")
+        kolommen = {r["name"] for r in self.conn.execute("PRAGMA table_info(calls)")}
+        if "wasted_reason" not in kolommen:
+            self.conn.execute("ALTER TABLE calls ADD COLUMN wasted_reason TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -613,6 +617,29 @@ class ProjectScope:
         )
 
     # -- geen-vooruitgang-detector ---------------------------------------
+    def open_run(self, task_id: int) -> int | None:
+        """De nog niet afgesloten run van deze taak, als die er is."""
+        rij = self._q(
+            "SELECT id FROM runs WHERE project_id = ? AND task_id = ?"
+            " AND ended_at IS NULL ORDER BY id DESC LIMIT 1",
+            (self.project_id, task_id),
+        )
+        return int(rij[0]["id"]) if rij else None
+
+    def mark_run_wasted(self, run_id: int, reason: str) -> int:
+        """Markeert de aanroepen van een run als verspild.
+
+        Het geld is uitgegeven en dat verandert niet. Wat wel verandert is of we
+        het kunnen zien: zonder markering verdwijnt verspilling in het totaal en
+        lijkt een dure mislukking net zo duur als nuttig werk.
+        """
+        cur = self.conn.execute(
+            "UPDATE calls SET wasted_reason = ?"
+            " WHERE run_id = ? AND project_id = ? AND wasted_reason IS NULL",
+            (reason, run_id, self.project_id),
+        )
+        return int(cur.rowcount or 0)
+
     def seen_signature(self, task_id: int, signature: str) -> bool:
         if not signature:
             return False

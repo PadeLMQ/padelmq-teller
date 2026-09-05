@@ -263,6 +263,22 @@ class Runner:
                 # 2 · uitvoeren
                 self.scope.set_task(task_id, status=TaskStatus.IMPLEMENTING.value)
                 prompt = self._build_prompt(task, acceptance, answered)
+                if self._herhaalde_betaalde_context(task_id, prompt, worktree):
+                    detail = (
+                        "dezelfde opdracht is al eens naar de uitvoerder gestuurd bij"
+                        " dezelfde toestand van de branch. Nog een keer betalen levert"
+                        " hetzelfde antwoord op; er is nieuwe informatie of een"
+                        " gewijzigde toestand nodig."
+                    )
+                    self.scope.set_task(task_id, status=TaskStatus.BLOCKED.value)
+                    self._log("herhaalde-opdracht", task_id=task_id, detail=detail)
+                    self.notifier.send(Message(
+                        subject=f"Herhaalde opdracht tegengehouden: {task['title'][:50]}",
+                        body=detail, project=self.project.slug, urgent=True,
+                        labels=["orch:block"],
+                    ))
+                    self.scope.end_run(run_id, "herhaalde_opdracht")
+                    return RunOutcome(TaskStatus.BLOCKED, detail)
                 self._preflight(self.settings.executor_model, task_id, run_id, 20000, 8000)
                 execution = self.executor.execute(
                     prompt=prompt, cwd=worktree.path, session_id=task["claude_session_id"]
@@ -465,6 +481,22 @@ class Runner:
             )
         return None
 
+    def _herhaalde_betaalde_context(self, task_id: int, prompt: str, worktree) -> bool:
+        """Is deze exacte betaalde opdracht al eens verstuurd?
+
+        Dezelfde prompt bij dezelfde toestand van de werkmap levert hetzelfde
+        antwoord op. Nog een keer versturen kost geld en brengt niets: dat is
+        precies het rondje dat in B7 $0,30 kostte.
+
+        De handtekening dekt de prompt EN de inhoud van de branch, zodat een
+        gewijzigde toestand wel een nieuwe poging rechtvaardigt.
+        """
+        kop = run_git(worktree.path, "rev-parse", "HEAD", check=False).strip()
+        vuil = run_git(worktree.path, "status", "--porcelain", check=False)
+        ruw = f"uitvoerder\n{prompt}\n{kop}\n{vuil}"
+        handtekening = "impl:" + hashlib.sha256(ruw.encode()).hexdigest()
+        return self.scope.seen_signature(task_id, handtekening)
+
     def _verify(self, worktree, *, task_id: int):
         """Draait de verificatie en ruimt op wat de checks zelf veranderd hebben.
 
@@ -477,11 +509,21 @@ class Runner:
         voor = self._gewijzigde_bestanden(worktree)
         verification = self.verifier.run(worktree.path, self.project.checks)
         erbij = sorted(self._gewijzigde_bestanden(worktree) - voor)
-        if erbij:
-            for pad in erbij:
-                run_git(worktree.path, "checkout", "--", pad, check=False)
-            self._log("verificatie-rommel", task_id=task_id, bestanden=erbij,
-                      detail="door de checks gewijzigde bestanden teruggezet")
+        if not erbij:
+            return verification
+
+        # Alleen bekende artefacten terugzetten. Een check die iets anders
+        # wijzigt is een verrassing: die melden we, maar we gooien hem niet weg,
+        # want dan zou een brede opruiming echt werk kunnen wissen.
+        bekend = set(self.project.verification_artifacts)
+        opgeruimd = [p for p in erbij if p in bekend]
+        onbekend = [p for p in erbij if p not in bekend]
+        for pad in opgeruimd:
+            run_git(worktree.path, "checkout", "--", pad, check=False)
+        self._log("verificatie-rommel", task_id=task_id,
+                  opgeruimd=opgeruimd, onbekend=onbekend,
+                  detail=("bekende verificatie-artefacten teruggezet; "
+                          "onbekende wijzigingen blijven staan en gaan mee in de diff"))
         return verification
 
     @staticmethod

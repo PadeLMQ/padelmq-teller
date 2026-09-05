@@ -483,3 +483,49 @@ Dat verdient een eerlijke kanttekening: het tweede punt is dus niet opgelost
 maar heroverwogen. Of de beoordelaar daarmee te soepel is, is een echte vraag.
 Wat wel vaststaat: het verwijderen van de ongerelateerde wijziging was genoeg om
 het oordeel te laten kantelen, en dat is precies wat D-11 blootlegde.
+
+---
+
+## Deel I — hardening na B7: tien garanties in code
+
+Elke garantie hieronder komt uit een defect dat in B7 werkelijk geld of een run
+heeft gekost. Ze staan in `tests/test_garanties.py` bij elkaar, zodat zichtbaar
+is wat door code wordt afgedwongen en niet door goede voornemens.
+
+| # | garantie | waar afgedwongen |
+|---|---|---|
+| 1 | bestaand werk wordt onderzocht en hergebruikt, nooit blind opnieuw gemaakt | `runner._resume_phase`, `git.create_worktree` |
+| 2 | een onuitvoerbare check (exit 127) blokkeert en veroorzaakt nooit een betaalde ronde | `runner._resume_phase` |
+| 3 | een betaalde aanroep wordt altijd geboekt; onboekbaar wordt `kosten-onbekend`, nooit stil $0 | `runner._charge`, `cost.InconsistentUsage` |
+| 4 | de tokenconventies van OpenAI en de Claude-CLI zijn expliciet gescheiden | `adapters.Usage`, `adapters.claude._usage_from_cli` |
+| 5 | de beoordelaar ziet de volledige taakdiff, ook bij hervat en al vastgelegd werk | `git.Worktree.full_diff` |
+| 6 | `revise`-feedback overleeft een herstart en komt expliciet in de revise-context | `tasks.review_feedback`, `runner._build_prompt` |
+| 7 | hergebruik van een worktree vernietigt de afhankelijkheden niet | `git.create_worktree` |
+| 8 | alleen **bekende** verificatie-artefacten worden teruggezet; onbekende wijzigingen blijven staan en worden gemeld | `project.verification_artifacts`, `runner._verify` |
+| 9 | authenticatie wordt op werking getoetst, niet op het bestaan van een variabele | `cli._reviewer_auth_status`, `reviewer.client`, `GitHubClient` |
+| 10 | dezelfde opdracht bij dezelfde toestand gaat niet nog eens naar een betaald model | `runner._herhaalde_betaalde_context` |
+
+### Garantie 8 is bewust versmald
+
+De eerste versie zette **elk** bestand terug dat tijdens de verificatie
+wijzigde. Dat is te ruw: zou een check ooit iets nuttigs genereren, dan werd dat
+weggegooid. Nu geldt een expliciete lijst per project
+(`verification_artifacts`, standaard `next-env.d.ts`). Een onbekende wijziging
+blijft staan en wordt gemeld — zichtbaar zijn is belangrijker dan opgeruimd zijn.
+
+### AI-efficiëntie
+
+`orchestrator efficiency [project]` toont nuttige tegenover verspilde kosten,
+de reden van verspilling, het percentage, en hoe vaak hergebruik een betaalde
+aanroep heeft bespaard.
+
+Verspilling telt **alleen als ze gemarkeerd is** — een gecrashte run markeert
+zijn eigen aanroepen. Wat niet gemarkeerd is, geldt als nuttig: te weinig
+verspilling melden is beter dan nuttig werk verdacht maken.
+
+> **Gat, bewust open gelaten.** De zes historische B7-aanroepen dateren van vóór
+> deze markering en staan dus als "nuttig" in de database. `efficiency` meldt
+> voor `padelmq-pro` daarom 0% verspild, terwijl we weten dat het 68% was. Het
+> met terugwerkende kracht markeren zou de historische audittrail wijzigen, en
+> dat is niet gedaan. De B7-cijfers zijn in plaats daarvan als ijkpunt in
+> `tests/test_garanties.py` vastgelegd: de metriek rekent ze aantoonbaar goed uit.
