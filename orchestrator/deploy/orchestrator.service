@@ -1,0 +1,15 @@
+# /etc/systemd/system/orchestrator.service
+[Unit]
+Description=AI Development Orchestrator
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=orchestrator
+WorkingDirectory=/opt/orchestrator
+EnvironmentFile=/opt/orchestrator/.env
+ExecStart=/opt/orchestrator/.venv/bin/orchestrator run --max-tasks 3
+TimeoutStartSec=3600
+
+[Install]
+WantedBy=multi-user.target

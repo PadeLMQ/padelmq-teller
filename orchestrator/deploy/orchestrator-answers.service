@@ -1,0 +1,11 @@
+# /etc/systemd/system/orchestrator-answers.service
+[Unit]
+Description=Antwoorden uit GitHub-issues verwerken
+After=network-online.target
+
+[Service]
+Type=oneshot
+User=orchestrator
+WorkingDirectory=/opt/orchestrator
+EnvironmentFile=/opt/orchestrator/.env
+ExecStart=/opt/orchestrator/.venv/bin/orchestrator poll-answers

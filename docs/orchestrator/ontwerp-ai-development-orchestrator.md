@@ -1,7 +1,7 @@
 # Universele AI Development Orchestrator — haalbaarheidsanalyse & technisch ontwerp
 
-**Versie:** 3 — alle beslissingen verwerkt op één na.
-**Status:** ontwerp ter beoordeling. Nog niets geïmplementeerd.
+**Versie:** 4 — alle beslissingen verwerkt op één na; de V1-kern is gebouwd.
+**Status:** ontwerp vastgesteld. De projectonafhankelijke kern staat in `orchestrator/` (§16).
 **Datum:** 5 september 2026
 **Opdrachtgever:** Mathias (PadeLMQ)
 
@@ -571,6 +571,48 @@ Deze kun je alvast klaarzetten; ze zijn nodig vóór de eerste run, niet vóór 
 
 ---
 
+## 16b. Wat er nu gebouwd is
+
+De projectonafhankelijke kern staat in `orchestrator/`. Dat kon zonder B5, want de
+architectuur kent geen vaste projectlijst — dat is precies wat beslissing B6 garandeert.
+Jouw pilotproject aankoppelen is één commando.
+
+**Werkt en is getest** (72 tests, `python3 -m unittest discover -s tests -t .`):
+
+| Onderdeel | Waar |
+|---|---|
+| Projectregister, `project add` met kennisbasis | `projects.py`, `knowledge.py` |
+| Projectisolatie met verplichte `project_id` in elke query | `db.py` |
+| Statusmodel van de kennisbasis; alleen `bevestigd` is citeerbaar | `knowledge.py` |
+| Triage AUTO/PARK/BLOCK met citatie-, status- en categoriepoort | `triage.py` |
+| Verzonnen-waarde-detector op de diff | `guards.py` |
+| Aanname zonder bron houdt de commit tegen | `runner.py` |
+| Geen-vooruitgang-detector | `guards.py`, `db.py` |
+| Kostenbewaking, vier niveaus, rem vóór de aanroep, waarschuwingen | `cost.py` |
+| Verificatiesterkte met meeschalende iteratielimieten | `verify.py`, `models.py` |
+| De toestandsmachine, end-to-end getest met echte git en echte checks | `runner.py` |
+| Redactie van geheimen vóór alles wat de machine verlaat | `redact.py` |
+| Beoordelaar kan een testuitslag niet overrulen | `adapters/reviewer.py` |
+| GitHub-issue bij BLOCK, antwoord met bevestigingsstap, taken hervatten | `answers.py` |
+| Dagrapport en PR-omschrijving | `report.py` |
+| Noodstop, opdrachtregel, systemd-units voor de VPS | `cli.py`, `deploy/` |
+
+**Bewust nog niet af, met reden:**
+
+| Onderdeel | Waarom |
+|---|---|
+| `import chatgpt` | Weigert te draaien. Het ontwerp legt vast dat we de structuur van de export op een echt bestand verifiëren voordat we de parser schrijven. Een parser op een geraden formaat is precies het giswerk dat we hier niet doen. |
+| De reviewer-aanroep | De code staat er, maar de exacte parametervorm van de Responses API moet met één echte aanroep bevestigd worden vóór de eerste productierun. |
+| PR automatisch openen | De omschrijving wordt al gebouwd en de GitHub-aanroep bestaat; de runner laat de branch nu klaarstaan. Kleine stap, wacht op een echt project. |
+| Parallelle projecten, auto-merge, dashboard | Zoals afgesproken buiten V1. |
+
+**Let op — deze repository is publiek.** De kern staat daarom bewust los van de
+gegevens: de datamap (`ORCH_DATA_DIR`, standaard buiten de repository) bevat de
+kennisbasis met je businessregels en hoort nooit in een publiek repo. Voordat dit in
+productie gaat, verhuist de code naar een eigen repository.
+
+---
+
 ## 17. Meetplan
 
 | Meetpunt | Wat het aantoont |
@@ -601,4 +643,4 @@ Deze kun je alvast klaarzetten; ze zijn nodig vóór de eerste run, niet vóór 
 
 ---
 
-*Er wordt niets geïmplementeerd voordat B5 beantwoord is.*
+*B5 is het enige dat nog ontbreekt om V1 op jouw echte project te richten.*

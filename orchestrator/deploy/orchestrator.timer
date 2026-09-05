@@ -1,0 +1,11 @@
+# /etc/systemd/system/orchestrator.timer
+[Unit]
+Description=Draait de orkestrator regelmatig
+
+[Timer]
+OnBootSec=2min
+OnUnitInactiveSec=10min
+Unit=orchestrator.service
+
+[Install]
+WantedBy=timers.target

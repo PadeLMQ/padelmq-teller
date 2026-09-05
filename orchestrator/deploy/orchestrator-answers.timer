@@ -1,0 +1,11 @@
+# /etc/systemd/system/orchestrator-answers.timer
+[Unit]
+Description=Antwoorden ophalen
+
+[Timer]
+OnBootSec=3min
+OnUnitInactiveSec=5min
+Unit=orchestrator-answers.service
+
+[Install]
+WantedBy=timers.target
