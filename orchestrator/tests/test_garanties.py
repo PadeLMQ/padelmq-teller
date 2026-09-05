@@ -343,3 +343,54 @@ class G7_WorktreeHergebruikSpaartDependencies(TempCase):
         tweede = adapter.create_worktree(repo, "orch/8", "main")
 
         self.assertNotIn("# restant", (tweede.path / "app.py").read_text(encoding="utf-8"))
+
+
+class G11_KostenremWerktOpDeEchtePrompt(unittest.TestCase):
+    """Een rem die een ander getal afremt dan er langskomt, remt niets."""
+
+    def test_schatting_groeit_met_de_prompt(self):
+        from orchestrator.runner import _schatting
+
+        klein_in, klein_uit = _schatting("x" * 400)
+        groot_in, groot_uit = _schatting("x" * 400_000)
+        self.assertEqual(klein_in, 100)
+        self.assertEqual(groot_in, 100_000)
+        self.assertGreater(groot_uit, klein_uit)
+
+    def test_lege_prompt_geeft_geen_nul(self):
+        """Nul zou elke rem laten passeren."""
+        from orchestrator.runner import _schatting
+
+        invoer, uitvoer = _schatting("")
+        self.assertGreaterEqual(invoer, 1)
+        self.assertGreaterEqual(uitvoer, 1)
+
+
+class G12_UitvoerderHervatGeenVreemdeSessie(unittest.TestCase):
+    """De uitvoerder speelde de sessie van de orkestrator zelf opnieuw af.
+
+    Dat liep op van $0,54 naar $1,91 per aanroep, met 1.477.278 invoertokens.
+    De prompt is zelfdragend; gespreksgeschiedenis is niet nodig.
+    """
+
+    def test_geen_resume_in_het_commando(self):
+        from orchestrator.adapters.claude import ClaudeExecutor
+
+        cmd = ClaudeExecutor("claude-opus-5")._command("doe iets", "een-sessie-id")
+        self.assertNotIn("--resume", cmd)
+        self.assertNotIn("een-sessie-id", cmd)
+
+    def test_de_prompt_zit_wel_in_het_commando(self):
+        from orchestrator.adapters.claude import ClaudeExecutor
+
+        cmd = ClaudeExecutor("claude-opus-5")._command("doe precies dit", None)
+        self.assertIn("doe precies dit", cmd)
+
+
+class G13_BudgetberichtInDeJuisteValuta(unittest.TestCase):
+    def test_geen_hardgecodeerde_euro(self):
+        from orchestrator.cost import BudgetExceeded
+
+        fout = BudgetExceeded("taak 1", 2.0, 1.91, 0.06, "$")
+        self.assertIn("$1.9100", str(fout))
+        self.assertNotIn("€", str(fout))

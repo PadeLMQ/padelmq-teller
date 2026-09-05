@@ -107,8 +107,13 @@ class ClaudeExecutor:
             "--allowedTools", self.allowed_tools,
             "--append-system-prompt", SYSTEM_ADDITION,
         ]
-        if session_id:
-            cmd += ["--resume", session_id]
+        # Bewust GEEN --resume. Het teruggekregen sessie-id is dat van de sessie
+        # waarin de orkestrator zelf draait, niet van een eigen gesprek per taak.
+        # Hervatten daarvan speelt die hele sessie opnieuw af en die groeit: in
+        # de pilot liep één aanroep zo op tot 1.477.278 invoertokens en $1,91,
+        # tegen $0,54 voor de eerste. De prompt is met opzet zelfdragend -- taak,
+        # acceptatiecriteria, beantwoorde vragen, reviewerfeedback en
+        # projectkennis zitten erin -- dus er is geen gespreksgeschiedenis nodig.
         return cmd
 
     def execute(self, *, prompt: str, cwd: Path, session_id: str | None = None) -> ExecutionResult:

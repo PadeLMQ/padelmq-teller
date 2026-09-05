@@ -389,7 +389,7 @@ def _build_runner(settings, db, project):
     guard = CostGuard(
         db, settings,
         on_warning=lambda level, pct, spent, limit: print(
-            f"waarschuwing: {level} op {pct:.0%} (€{spent:.2f} van €{limit:.2f})"
+            f"waarschuwing: {level} op {pct:.0%} ({settings.symbol}{spent:.2f} van {settings.symbol}{limit:.2f})"
         ),
     )
     reviewer = None

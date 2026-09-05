@@ -14,14 +14,16 @@ from .db import Database, ProjectScope
 
 
 class BudgetExceeded(RuntimeError):
-    def __init__(self, level: str, limit: float, spent: float, estimated: float):
+    def __init__(self, level: str, limit: float, spent: float, estimated: float,
+                 symbol: str = "$"):
         self.level = level
         self.limit = limit
         self.spent = spent
         self.estimated = estimated
+        self.symbol = symbol
         super().__init__(
-            f"budget {level} bereikt: besteed €{spent:.2f} + geschat €{estimated:.2f}"
-            f" > limiet €{limit:.2f}"
+            f"budget {level} bereikt: besteed {symbol}{spent:.4f}"
+            f" + geschat {symbol}{estimated:.4f} > limiet {symbol}{limit:.2f}"
         )
 
 
@@ -143,7 +145,7 @@ class CostGuard:
         if limit <= 0:
             return
         if spent + estimated > limit:
-            raise BudgetExceeded(level, limit, spent, estimated)
+            raise BudgetExceeded(level, limit, spent, estimated, self.settings.symbol)
         for step in WARNING_STEPS:
             if spent < limit * step <= spent + estimated:
                 key = (level, step)

@@ -46,6 +46,21 @@ class RunOutcome:
             self.questions = []
 
 
+def _schatting(prompt: str, uitvoerfactor: float = 0.25) -> tuple[int, int]:
+    """Ruwe tokenschatting uit de werkelijke prompt.
+
+    De rem stond eerder op een vast getal van 20000 invoer- en 8000
+    uitvoertokens, ongeacht wat er verstuurd werd. Een rem die een ander getal
+    afremt dan er langskomt, remt niets: in de pilot ging er zo een aanroep van
+    1,4 miljoen tokens doorheen.
+
+    Vier tekens per token is grof maar aan de veilige kant voor Nederlands en
+    code; overschatten is hier het juiste risico.
+    """
+    invoer = max(1, len(prompt) // 4)
+    return invoer, max(1, int(invoer * uitvoerfactor))
+
+
 class Runner:
     def __init__(
         self,
@@ -324,7 +339,10 @@ class Runner:
                     ))
                     self.scope.end_run(run_id, "herhaalde_opdracht")
                     return RunOutcome(TaskStatus.BLOCKED, detail)
-                self._preflight(self.settings.executor_model, task_id, run_id, 20000, 8000)
+                self._preflight(
+                    self.settings.executor_model, task_id, run_id,
+                    *_schatting(prompt),
+                )
                 execution = self.executor.execute(
                     prompt=prompt, cwd=worktree.path, session_id=task["claude_session_id"]
                 )
