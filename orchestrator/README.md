@@ -41,6 +41,14 @@ orchestrator run mijnapp
 
 Verder: `questions`, `answer`, `poll-answers`, `digest`, `costs`, `pause`.
 
+### Voordat je aankoppelt
+
+```bash
+orchestrator inspect ~/code/mijnapp      # welke verificatie is er echt?
+orchestrator verify-reviewer --offline   # klopt de reviewer-aanroep met de SDK?
+orchestrator secret-scan .               # staat er niets geheims in git?
+```
+
 ## Wat de veiligheid draagt
 
 | Mechanisme | Waar |
@@ -55,6 +63,10 @@ Verder: `questions`, `answer`, `poll-answers`, `digest`, `costs`, `pause`.
 | Beoordelaar kan een testuitslag niet overrulen | `adapters/reviewer.py` |
 | Projectisolatie via verplichte `project_id` | `db.py` |
 | Noodstop | `config.py`, `orchestrator pause` |
+| Datamap mag nooit in een git-repo liggen | `config.py`, geweigerd door `run` en `doctor` |
+| Geheimenscan met vindbaar ontsnappingsluik (`nep-geheim`) | `secret_scan.py`, `deploy/pre-commit` |
+| Reviewer-aanroep valideren zonder stille terugval | `validate_reviewer.py` |
+| Verificatie vaststellen op wat er werkelijk draait | `inspect.py` |
 
 ## Tests
 
@@ -62,7 +74,7 @@ Verder: `questions`, `answer`, `poll-answers`, `digest`, `costs`, `pause`.
 python3 -m unittest discover -s tests -t .
 ```
 
-72 tests, geen externe afhankelijkheden nodig behalve PyYAML en `git`. De lus
+96 tests, geen externe afhankelijkheden nodig behalve PyYAML en `git`. De lus
 wordt end-to-end getest met een echte git-repository en echte
 verificatiecommando's; alleen de modellen zijn nepobjecten.
 
@@ -71,10 +83,19 @@ verificatiecommando's; alleen de modellen zijn nepobjecten.
 | Onderdeel | Status |
 |---|---|
 | `import chatgpt` | Weigert bewust te draaien. Het ontwerp legt vast dat we de structuur van de export op een echt bestand verifiëren voordat we de parser schrijven. |
-| Reviewer-aanroep | De code staat er; de exacte parametervorm van de Responses API moet met één echte aanroep bevestigd worden vóór de eerste productierun. |
-| PR automatisch openen | `report.pr_body()` bouwt de omschrijving en `notify/github.py` heeft `create_pull_request`; de runner laat de branch nu klaarstaan. Aansluiten is een kleine stap. |
+| Reviewer-aanroep | `orchestrator verify-reviewer --offline` controleert de SDK-handtekening zonder netwerk of kosten. De online trap (één minimale echte aanroep) moet nog gedraaid worden vóór de eerste productierun; bij afwijking stopt hij in plaats van terug te vallen. |
 | Parallelle projecten | V1 draait sequentieel; dat is doorvoer, geen functionaliteit. |
 | Auto-merge | Alleen als schakelaar in `project.yaml`, standaard uit, niet geïmplementeerd. |
+
+## De code naar een eigen private repository
+
+```bash
+./deploy/verhuis-naar-eigen-repo.sh                    # proef: scant en splitst, pusht niets
+./deploy/verhuis-naar-eigen-repo.sh --push <git-url>   # pas na jouw controle
+```
+
+De proef weigert te splitsen als er iets geheims in de map staat, en controleert
+dat de afgesplitste branch geen bestanden van buiten `orchestrator/` bevat.
 
 ## Naar de VPS
 

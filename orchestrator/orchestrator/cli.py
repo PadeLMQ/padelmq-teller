@@ -23,6 +23,21 @@ def _settings() -> Settings:
     return settings
 
 
+def _guard_data_dir(settings: Settings) -> bool:
+    """De kennisbasis hoort nooit in een repository. Weiger als dat toch zo is."""
+    repo = settings.data_dir_inside_git()
+    if repo is None:
+        return True
+    print(
+        f"GEWEIGERD: de datamap {settings.data_dir} ligt binnen de git-repository"
+        f" {repo}.\n"
+        "Daar staan je businessregels en beslissingen in; die horen nooit in git.\n"
+        "Zet ORCH_DATA_DIR op een pad buiten elke repository.",
+        file=sys.stderr,
+    )
+    return False
+
+
 def _db(settings: Settings) -> Database:
     return Database(settings.db_path)
 
@@ -220,6 +235,11 @@ def cmd_doctor(args) -> int:
             f"geen prijs bekend voor {settings.reviewer_model};"
             " zet ORCH_REVIEWER_PRICE_IN en ORCH_REVIEWER_PRICE_OUT"
         )
+    if settings.data_dir_inside_git():
+        problems.append(
+            f"de datamap ligt binnen de git-repository "
+            f"{settings.data_dir_inside_git()}; verplaats hem"
+        )
     import shutil
     if shutil.which("claude") is None:
         problems.append("'claude' staat niet in PATH")
@@ -257,6 +277,7 @@ def _build_runner(settings, db, project):
         ),
     )
     reviewer = OpenAIReviewer(settings.reviewer_model) if project.reviewer_enabled else None
+    github = GitHubClient() if project.github_repo else None
     return Runner(
         settings=settings,
         project=project,
@@ -268,6 +289,7 @@ def _build_runner(settings, db, project):
         git=GitAdapter(settings.data_dir / "worktrees"),
         notifier=MultiNotifier(*channels),
         cost=guard,
+        github=github,
     )
 
 
@@ -275,6 +297,8 @@ def cmd_run(args) -> int:
     from .runner import Paused
 
     settings = _settings()
+    if not _guard_data_dir(settings):
+        return 2
     db = _db(settings)
     if settings.paused():
         print(f"noodstop actief ({settings.stop_file}); niets gedaan")
@@ -310,6 +334,47 @@ def cmd_run(args) -> int:
     if done == 0:
         print("niets te doen; alle taken staan klaar, geparkeerd of geblokkeerd")
     return 0
+
+
+
+def cmd_inspect(args) -> int:
+    from .inspect import format_report, inspect as inspect_repo
+
+    print(format_report(inspect_repo(Path(args.path).expanduser())))
+    return 0
+
+
+def cmd_verify_reviewer(args) -> int:
+    from .validate_reviewer import validate_offline, validate_online
+
+    settings = _settings()
+    offline = validate_offline()
+    print(offline.render())
+    if offline.failed:
+        return 1
+    if args.offline:
+        print("\n(alleen de offline trap gedraaid; voeg --online toe voor een echte aanroep)")
+        return 0
+
+    model = args.model or settings.reviewer_model
+    if not model:
+        print("geen model opgegeven; gebruik --model of zet ORCH_REVIEWER_MODEL",
+              file=sys.stderr)
+        return 2
+    print()
+    online = validate_online(model)
+    print(online.render())
+    return 1 if online.failed else 0
+
+
+
+def cmd_secret_scan(args) -> int:
+    from .secret_scan import format_hits, scan_staged, scan_tree
+
+    root = Path(args.path or ".").expanduser().resolve()
+    hits = scan_staged(root) if args.staged else scan_tree(root)
+    print(format_hits(hits))
+    return 1 if hits else 0
 
 
 def build_parser() -> argparse.ArgumentParser:
@@ -381,6 +446,23 @@ def build_parser() -> argparse.ArgumentParser:
     run.add_argument("--max-tasks", type=int, default=1,
                      help="hoeveel taken maximaal in deze aanroep (standaard 1)")
     run.set_defaults(func=cmd_run)
+
+    inspect_p = sub.add_parser("inspect", help="welke verificatie heeft een repository echt")
+    inspect_p.add_argument("path")
+    inspect_p.set_defaults(func=cmd_inspect)
+
+    verify = sub.add_parser("verify-reviewer",
+                            help="controleer de reviewer-aanroep tegen de echte SDK/API")
+    verify.add_argument("--model", help="goedkoopste geschikte model voor de validatie")
+    verify.add_argument("--offline", action="store_true",
+                        help="alleen de SDK-handtekening controleren; geen netwerk, geen kosten")
+    verify.set_defaults(func=cmd_verify_reviewer)
+
+    scan = sub.add_parser("secret-scan", help="controleer op geheimen voor ze in git belanden")
+    scan.add_argument("path", nargs="?", default=".")
+    scan.add_argument("--staged", action="store_true",
+                      help="alleen wat klaarstaat om gecommit te worden")
+    scan.set_defaults(func=cmd_secret_scan)
 
     doctor = sub.add_parser("doctor", help="omgeving controleren")
     doctor.set_defaults(func=cmd_doctor)

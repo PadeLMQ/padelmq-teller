@@ -95,3 +95,17 @@ class Settings:
 
     def paused(self) -> bool:
         return self.stop_file.exists()
+
+    def data_dir_inside_git(self) -> Path | None:
+        """Staat de datamap binnen een git-werkboom?
+
+        De kennisbasis bevat je businessregels en de database bevat je
+        geschiedenis. Die horen nooit in een repository, ook niet per ongeluk
+        doordat de datamap onder een gekloonde map is gezet. Geeft de map met
+        de .git terug als dat zo is, anders None.
+        """
+        current = self.data_dir.expanduser().resolve()
+        for candidate in [current, *current.parents]:
+            if (candidate / ".git").exists():
+                return candidate
+        return None

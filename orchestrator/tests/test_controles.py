@@ -68,10 +68,11 @@ class Aannames(unittest.TestCase):
 
 class Redactie(unittest.TestCase):
     def test_sleutels_worden_geredigeerd(self):
-        text = 'SHOP_CLIENT_SECRET = "abc123geheimwaarde"\nshpat_ABCdef123456'
+        token = "shpat_" + "ABCdef123456"  # nep-geheim: verzonnen waarde
+        text = f'SHOP_CLIENT_SECRET = "abc123geheimwaarde"\n{token}'
         out = redact_text(text)
         self.assertNotIn("abc123geheimwaarde", out)
-        self.assertNotIn("shpat_ABCdef123456", out)
+        self.assertNotIn(token, out)
 
     def test_env_bestand_gaat_niet_mee(self):
         diff = (

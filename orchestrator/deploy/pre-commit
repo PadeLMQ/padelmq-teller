@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+# Installeren:  ln -sf ../../deploy/pre-commit .git/hooks/pre-commit
+# Weigert een commit met een geheim erin. Uit de geschiedenis krijg je het
+# niet meer weg, dus dit is een harde poort.
+set -euo pipefail
+ROOT="$(git rev-parse --show-toplevel)"
+python3 - "$ROOT" <<'PY'
+import sys
+from pathlib import Path
+sys.path.insert(0, str(Path(sys.argv[1]) / "orchestrator"))
+from orchestrator.secret_scan import format_hits, scan_staged
+hits = scan_staged(Path(sys.argv[1]))
+if hits:
+    print(format_hits(hits), file=sys.stderr)
+    raise SystemExit(1)
+PY
