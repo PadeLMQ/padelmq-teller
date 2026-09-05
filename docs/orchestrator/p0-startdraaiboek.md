@@ -416,3 +416,40 @@ onzinbedrag geboekt.
 **Nog niet hersteld.** Runs die crashten blijven open staan (`ended_at` leeg);
 alleen de laatste run is netjes afgesloten. Dat is cosmetisch in de
 rapportage en is bewust blijven liggen.
+
+---
+
+## Deel G — defecten uit de hervatting van B7
+
+Na het beantwoorden van de twee BLOCK-vragen kwamen er nog vijf defecten
+bovendrijven. Vier zijn hersteld, één staat geregistreerd.
+
+| # | defect | gevolg | status |
+|---|---|---|---|
+| D-7 | de lus riep de uitvoerder onvoorwaardelijk aan; er was geen controle of bestaand werk nog voldeed | opnieuw betalen voor werk dat al in een commit stond | hersteld: `_resume_phase` laat de harde verificatie beslissen |
+| D-8 | de beoordelaar kreeg `uncommitted_diff()`; bij hervat werk is alles al vastgelegd | de beoordelaar kreeg een **lege diff** en keurde goed wat hij nooit gezien had | hersteld: `full_diff(base)` toont vastgelegd en niet-vastgelegd werk |
+| D-9 | `GitHubClient` weigerde te versturen zonder `ORCH_GITHUB_TOKEN` | geen PR mogelijk, terwijl de credential al door de proxy geleverd wordt | hersteld, zelfde patroon als bij `doctor` en de reviewer |
+| D-10 | exitcode 127 werd gelezen als "werk is stuk" in plaats van "check kon niet draaien" | **$0,296538 betaald** voor het opnieuw maken van werk dat al klaar was | hersteld: een onuitvoerbare verificatie blokkeert en implementeert niet opnieuw |
+| D-11 | `npm run build` als harde check schrijft `next-env.d.ts` in de worktree | die wijziging belandt in de diff die beoordeeld en gecommit wordt; de beoordelaar merkte het terecht op als ongerelateerde wijziging | **geregistreerd, niet hersteld** |
+
+### Over D-11
+
+Ik ben hier zelf tweemaal handmatig omheen gelopen door het bestand terug te
+zetten, zonder het te registreren. Dat was precies het gedrag dat dit systeem
+moet uitsluiten: een probleem wegpoetsen in plaats van het vastleggen.
+
+Een harde check die de werkmap wijzigt, vervuilt de diff. Mogelijke richtingen:
+gegenereerde bestanden na verificatie terugzetten, ze uit de diff filteren, of
+de build in een aparte map laten schrijven. Welke van de drie het wordt, heeft
+gevolgen voor wat de beoordelaar te zien krijgt en is dus geen detail.
+
+### Wat D-10 kostte, en wat dat leert
+
+De hervatting was bedoeld om **geen** nieuwe implementatiecall te doen. Dat is
+niet gelukt, en de oorzaak is leerzaam: de orkestrator kon "de check faalde"
+niet onderscheiden van "de check kon niet draaien". Precies dat onderscheid
+bepaalde of er $0,30 uitging.
+
+Een verse worktree heeft geen `node_modules`. Hoe een worktree aan zijn
+afhankelijkheden komt — `npm ci` per worktree, of delen met de hoofdmap — is
+een ontwerpkeuze met gevolgen voor snelheid en isolatie, en staat geparkeerd.
