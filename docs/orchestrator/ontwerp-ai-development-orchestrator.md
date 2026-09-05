@@ -1,6 +1,6 @@
 # Universele AI Development Orchestrator — haalbaarheidsanalyse & technisch ontwerp
 
-**Versie:** 6 — schrijfpad naar Shopify getest, verboden-commandopoort gebouwd.
+**Versie:** 7 — spraakeindpunt gebouwd; P2 is werkend zonder P0 op te houden.
 **Status:** ontwerp vastgesteld. Kern gebouwd. Pilot: **PadeLMQ/padelmq-pro**.
 **Datum:** 5 september 2026
 **Opdrachtgever:** Mathias (PadeLMQ)
@@ -799,8 +799,25 @@ Het transport zit bewust **niet** in de kern. Het praat met precies twee handeli
 | **Telegram-spraakbericht** | Je spreekt een spraakbericht in; de orkestrator transcribeert het en antwoordt met tekst of audio | Geeft wél audio en een zekerheidsscore; werkt overal | Minder handsfree: je moet de app openen |
 | *Eigen iOS-app* | — | — | **Afgewezen voor V1**: weken werk voor iets dat een Shortcut ook doet |
 
-Wat er nog gebouwd moet worden voor P2: een klein HTTP-eindpunt op de VPS met tokenauthenticatie
-(`GET /voice/next`, `POST /voice/answer`), en de keuze voor de transcriptiedienst.
+**Het eindpunt is gebouwd.** `orchestrator voice-serve` draait twee routes op de
+standaardbibliotheek — geen webframework voor twee handelingen:
+
+| | |
+|---|---|
+| `GET /voice/next[?project=…]` | de oudste openstaande blokkade over alle projecten heen |
+| `POST /voice/answer` | `{sessie, transcript, zekerheid?}` → wat er nu gezegd moet worden |
+
+Beide met de kop `X-Orch-Token`. Zonder deugdelijk token (minstens 24 tekens) start de
+dienst niet; het token wordt in constante tijd vergeleken en staat nooit in een URL. De
+dienst luistert standaard alleen op localhost en het aantal verzoeken is begrensd. Een
+sessie draagt zelf welk project erbij hoort, dus een antwoord kan niet bij het verkeerde
+project belanden — dat wordt opgezocht, niet geraden.
+
+De Shortcut-handleiding staat in [`spraak-shortcut.md`](../spraak-shortcut.md), inclusief
+de eerlijke kanttekening dat *Tekst dicteren* geen zekerheidsscore teruggeeft.
+
+Wat nog open staat voor P2: de keuze voor een transcriptiedienst als je die score wél
+wilt.
 
 ### Veiligheid
 

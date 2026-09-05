@@ -1,0 +1,18 @@
+# /etc/systemd/system/orchestrator-voice.service
+# Luistert standaard alleen op localhost. Zet er een reverse proxy met TLS voor
+# (Caddy of nginx) voordat je dit vanaf je telefoon bereikt.
+[Unit]
+Description=Spraakeindpunt van de orkestrator
+After=network-online.target
+
+[Service]
+Type=simple
+User=orchestrator
+WorkingDirectory=/opt/orchestrator
+EnvironmentFile=/opt/orchestrator/.env
+ExecStart=/opt/orchestrator/.venv/bin/orchestrator voice-serve
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target

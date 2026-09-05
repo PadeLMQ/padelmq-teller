@@ -403,6 +403,40 @@ def cmd_question_add(args) -> int:
     return 0
 
 
+
+def cmd_voice_serve(args) -> int:
+    from .voice.api import maak_server
+    from .voice.service import VoiceService
+
+    settings = _settings()
+    if not _guard_data_dir(settings):
+        return 2
+    db = _db(settings)
+    try:
+        server = maak_server(
+            VoiceService(settings, db), host=args.host, port=args.port,
+            per_minuut=args.per_minuut,
+        )
+    except RuntimeError as exc:
+        print(str(exc), file=sys.stderr)
+        return 2
+    host, poort = server.server_address[:2]
+    print(f"spraakeindpunt luistert op http://{host}:{poort}")
+    print("  GET  /voice/next[?project=<slug>]")
+    print("  POST /voice/answer")
+    if host not in ("127.0.0.1", "::1", "localhost"):
+        print("LET OP: dit luistert niet alleen op localhost. Zet er een reverse proxy",
+              "met TLS voor; stuur dit token nooit onversleuteld over het internet.",
+              file=sys.stderr)
+    try:
+        server.serve_forever()
+    except KeyboardInterrupt:
+        print("\ngestopt")
+    finally:
+        server.server_close()
+    return 0
+
+
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="orchestrator", description=__doc__)
     parser.add_argument("--version", action="version", version=__version__)
@@ -499,6 +533,12 @@ def build_parser() -> argparse.ArgumentParser:
     scan.add_argument("--staged", action="store_true",
                       help="alleen wat klaarstaat om gecommit te worden")
     scan.set_defaults(func=cmd_secret_scan)
+
+    voice = sub.add_parser("voice-serve", help="het spraakeindpunt draaien")
+    voice.add_argument("--host", default=None, help="standaard 127.0.0.1")
+    voice.add_argument("--port", type=int, default=None, help="standaard 8765")
+    voice.add_argument("--per-minuut", type=int, default=60, dest="per_minuut")
+    voice.set_defaults(func=cmd_voice_serve)
 
     doctor = sub.add_parser("doctor", help="omgeving controleren")
     doctor.set_defaults(func=cmd_doctor)

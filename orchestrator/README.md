@@ -79,7 +79,7 @@ orchestrator secret-scan .               # staat er niets geheims in git?
 python3 -m unittest discover -s tests -t .
 ```
 
-129 tests, geen externe afhankelijkheden nodig behalve PyYAML en `git`. De lus
+146 tests, geen externe afhankelijkheden nodig behalve PyYAML en `git`. De lus
 wordt end-to-end getest met een echte git-repository en echte
 verificatiecommando's; alleen de modellen zijn nepobjecten.
 
@@ -92,16 +92,26 @@ verificatiecommando's; alleen de modellen zijn nepobjecten.
 | Parallelle projecten | V1 draait sequentieel; dat is doorvoer, geen functionaliteit. |
 | Auto-merge | Alleen als schakelaar in `project.yaml`, standaard uit, niet geïmplementeerd. |
 
-## Spraak (P2) — de naad is er, het transport nog niet
+## Spraak (P2)
 
-`voice/` levert precies twee handelingen voor een transport: `next_question()` en
-`submit(session_id, transcript, confidence)`. Alles wat bepaalt of een antwoord
-voldoende is, zit in `answer_session.py` en is gedeeld met de andere kanalen — er
-hoeft dus niets herbouwd te worden als spraak erbij komt.
+```bash
+openssl rand -hex 24        # zet dit in .env als ORCH_VOICE_TOKEN
+orchestrator voice-serve    # standaard 127.0.0.1:8765
+```
 
-Nog te bouwen: het HTTP-eindpunt op de VPS (`GET /voice/next`, `POST /voice/answer`)
-met tokenauthenticatie, en de keuze voor de transcriptiedienst. Zie §16d van het
-ontwerp voor de twee transportroutes.
+Twee handelingen, meer heeft een transport niet nodig:
+
+| | |
+|---|---|
+| `GET /voice/next[?project=…]` | de oudste openstaande blokkade, klaar om voor te lezen |
+| `POST /voice/answer` | `{sessie, transcript, zekerheid?}` → wat er nu gezegd moet worden |
+
+Beide met de kop `X-Orch-Token`. Zonder deugdelijk token start de dienst niet;
+standaard luistert hij alleen op localhost. Zet er een reverse proxy met TLS voor.
+
+De Shortcut-handleiding staat in [`docs/spraak-shortcut.md`](docs/spraak-shortcut.md).
+Alles wat bepaalt of een antwoord voldoende is, zit in `answer_session.py` en is
+gedeeld met de andere kanalen — het transport beslist niets.
 
 ## De code naar een eigen private repository
 

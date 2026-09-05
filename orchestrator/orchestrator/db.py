@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import json
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any, Iterable
 
@@ -143,12 +144,39 @@ CREATE TABLE IF NOT EXISTS signatures (
 SCOPED_TABLES = ("tasks", "questions", "runs", "calls", "events", "signatures")
 
 
+class _GedeeldeVerbinding:
+    """Serialiseert toegang tot één SQLite-verbinding over meerdere draden.
+
+    Nodig omdat het spraakeindpunt elk verzoek in een eigen draad afhandelt.
+    Eén verbinding met een slot is op deze schaal eenvoudiger en veiliger dan
+    een verbinding per draad: geen halfafgemaakte transacties, geen
+    verbindingen die blijven hangen.
+    """
+
+    def __init__(self, conn: sqlite3.Connection):
+        self._conn = conn
+        self._slot = threading.RLock()
+
+    def execute(self, sql: str, params: Iterable[Any] = ()) -> sqlite3.Cursor:
+        with self._slot:
+            return self._conn.execute(sql, tuple(params))
+
+    def executescript(self, sql: str) -> sqlite3.Cursor:
+        with self._slot:
+            return self._conn.executescript(sql)
+
+    def close(self) -> None:
+        with self._slot:
+            self._conn.close()
+
+
 class Database:
     def __init__(self, path: Path | str):
         self.path = Path(path)
         self.path.parent.mkdir(parents=True, exist_ok=True)
-        self.conn = sqlite3.connect(self.path, isolation_level=None)
-        self.conn.row_factory = sqlite3.Row
+        raw = sqlite3.connect(self.path, isolation_level=None, check_same_thread=False)
+        raw.row_factory = sqlite3.Row
+        self.conn = _GedeeldeVerbinding(raw)
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
 
@@ -192,7 +220,7 @@ class ProjectScope:
         self.slug = slug
 
     @property
-    def conn(self) -> sqlite3.Connection:
+    def conn(self) -> "_GedeeldeVerbinding":
         return self._db.conn
 
     def _q(self, sql: str, params: tuple = ()) -> list[sqlite3.Row]:
