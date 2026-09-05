@@ -90,8 +90,13 @@ class Settings:
         reviewer_in = os.environ.get("ORCH_REVIEWER_PRICE_IN")
         reviewer_out = os.environ.get("ORCH_REVIEWER_PRICE_OUT")
         if reviewer_in and reviewer_out:
+            # Het cachetarief is optioneel. Staat het er niet, dan rekenen we
+            # cachetokens tegen het gewone invoertarief: te veel boeken is
+            # veilig, te weinig boeken verbergt kosten.
+            cached_raw = os.environ.get("ORCH_REVIEWER_PRICE_CACHED_IN")
+            cached = float(cached_raw) if cached_raw else float(reviewer_in)
             settings.prices[settings.reviewer_model] = ModelPrice(
-                float(reviewer_in), float(reviewer_out)
+                float(reviewer_in), float(reviewer_out), cached
             )
         return settings
 

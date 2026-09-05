@@ -75,3 +75,33 @@ class CachedTokensUitlezen(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class CachetariefUitOmgeving(unittest.TestCase):
+    """ORCH_REVIEWER_PRICE_CACHED_IN moet echt doorwerken in de prijstabel."""
+
+    def _laad(self, **extra):
+        import os
+        from unittest import mock
+        from orchestrator.config import Settings
+
+        omgeving = {
+            "ORCH_REVIEWER_MODEL": "gpt-5.6-terra",
+            "ORCH_REVIEWER_PRICE_IN": "2.00",
+            "ORCH_REVIEWER_PRICE_OUT": "12.00",
+        }
+        omgeving.update(extra)
+        with mock.patch.dict(os.environ, omgeving, clear=False):
+            for weg in ("ORCH_REVIEWER_PRICE_CACHED_IN",):
+                if weg not in omgeving:
+                    os.environ.pop(weg, None)
+            return Settings.from_env().prices["gpt-5.6-terra"]
+
+    def test_cachetarief_wordt_gelezen(self):
+        prijs = self._laad(ORCH_REVIEWER_PRICE_CACHED_IN="0.20")
+        self.assertEqual(prijs.cached_input_per_mtok, 0.20)
+
+    def test_zonder_cachetarief_valt_terug_op_invoertarief(self):
+        """Niet op 0.00: te weinig boeken verbergt kosten."""
+        prijs = self._laad()
+        self.assertEqual(prijs.cached_input_per_mtok, 2.00)

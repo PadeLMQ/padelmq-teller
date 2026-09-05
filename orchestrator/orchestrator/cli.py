@@ -249,6 +249,36 @@ def _sleutel_status(naam: str) -> str:
     return f"gezet (vingerafdruk {afdruk})"
 
 
+
+def _reviewer_auth_status() -> tuple[bool, str]:
+    """Kan de reviewer werkelijk authenticeren?
+
+    De oude controle keek of OPENAI_API_KEY gezet was. Dat bewijst niets: een
+    verlopen sleutel haalt die test even goed. En het is onjuist in een omgeving
+    waar een credential-proxy de Authorization-header buiten deze runtime
+    injecteert; daar hoort de sleutel juist NIET in het procesgeheugen te staan.
+
+    We vragen daarom de modellenlijst op. Dat is een gratis eindpunt: het kost
+    geen tokens en verbruikt geen budget, maar het bewijst het hele pad --
+    netwerk, egress-policy, authenticatie en SDK -- in een keer.
+    """
+    try:
+        from openai import OpenAI
+    except ImportError:
+        return False, "pakket 'openai' ontbreekt"
+
+    in_omgeving = bool(os.environ.get("OPENAI_API_KEY"))
+    # Zonder sleutel in de omgeving moet de SDK toch een waarde hebben om een
+    # client te bouwen. De proxy vervangt de header; deze waarde is geen geheim.
+    sleutel = None if in_omgeving else "placeholder-credential-proxy"
+    bron = "sleutel uit omgeving" if in_omgeving else "credential-proxy"
+    try:
+        modellen = OpenAI(api_key=sleutel).models.list()
+    except Exception as exc:  # noqa: BLE001 - elke fout is hier een probleem
+        return False, f"{bron}: {type(exc).__name__}: {str(exc)[:120]}"
+    aantal = len(getattr(modellen, "data", []) or [])
+    return True, f"OK via {bron} ({aantal} modellen zichtbaar, gratis eindpunt)"
+
 def cmd_doctor(args) -> int:
     settings = _settings()
     print(f"orchestrator {__version__}")
@@ -269,8 +299,10 @@ def cmd_doctor(args) -> int:
         print(f"  {naam:20} {_sleutel_status(naam)}")
 
     problems = []
-    if not os.environ.get("OPENAI_API_KEY"):
-        problems.append("OPENAI_API_KEY ontbreekt; de reviewer kan niet draaien")
+    ok, detail = _reviewer_auth_status()
+    print(f"reviewer-auth   {detail}")
+    if not ok:
+        problems.append(f"de reviewer kan niet authenticeren: {detail}")
     try:
         import openai  # noqa: F401
     except ImportError:
