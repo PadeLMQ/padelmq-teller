@@ -14,9 +14,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 # De Claude Code CLI is de uitvoerder. Zonder deze doet de orkestrator niets.
 RUN npm install -g @anthropic-ai/claude-code
 
-# De OpenAI-SDK voor de beoordelaar. Verder heeft de orkestrator geen
-# afhankelijkheden: dat is met opzet zo gehouden.
-RUN pip3 install --no-cache-dir --break-system-packages "openai>=1.0"
+# Twee afhankelijkheden, en niet meer: de OpenAI-SDK voor de beoordelaar en
+# PyYAML voor de projectconfiguratie. De rest draait op de standaardbibliotheek,
+# en dat is met opzet zo gehouden.
+RUN pip3 install --no-cache-dir --break-system-packages "openai>=1.0" "PyYAML>=6.0"
 
 WORKDIR /app
 COPY orchestrator /app/orchestrator

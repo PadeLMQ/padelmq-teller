@@ -29,7 +29,7 @@ else
 fi
 
 echo "==> afhankelijkheden"
-python3 -m pip install --quiet --upgrade "openai>=1.0"
+python3 -m pip install --quiet --upgrade "openai>=1.0" "PyYAML>=6.0"
 command -v claude >/dev/null 2>&1 || echo "   LET OP: 'claude' staat niet in PATH; de uitvoerder kan niet draaien"
 command -v git    >/dev/null 2>&1 || { echo "   git ontbreekt"; exit 1; }
 

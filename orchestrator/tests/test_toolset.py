@@ -145,3 +145,35 @@ class G8_OntbrekendGereedschapFaaltDicht(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class G9_ImageBevatAlleAfhankelijkheden(unittest.TestCase):
+    """Wat de code importeert, moet in het image geïnstalleerd worden.
+
+    PyYAML ontbrak in het Dockerfile en zou pas op Railway zijn opgevallen --
+    bij het laden van de eerste projectconfiguratie.
+    """
+
+    def test_elke_externe_import_wordt_geinstalleerd(self):
+        import ast
+        import pathlib
+        import sys
+
+        wortel = pathlib.Path(__file__).resolve().parents[1]
+        dockerfile = (wortel.parent / "deploy" / "railway" / "Dockerfile").read_text()
+
+        stdlib = set(sys.stdlib_module_names)
+        extern = set()
+        for f in (wortel / "orchestrator").rglob("*.py"):
+            for node in ast.walk(ast.parse(f.read_text(encoding="utf-8"))):
+                if isinstance(node, ast.Import):
+                    extern |= {a.name.split(".")[0] for a in node.names}
+                elif isinstance(node, ast.ImportFrom) and node.level == 0 and node.module:
+                    extern.add(node.module.split(".")[0])
+
+        # De pakketnaam op PyPI is niet altijd de modulenaam.
+        pypi = {"yaml": "PyYAML", "openai": "openai"}
+        for module in sorted(extern - stdlib - {"orchestrator"}):
+            naam = pypi.get(module, module)
+            self.assertIn(naam, dockerfile,
+                          f"{module!r} wordt geïmporteerd maar {naam!r} staat niet in het Dockerfile")
