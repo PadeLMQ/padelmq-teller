@@ -51,10 +51,15 @@ def acceptatiecriteria(body: str) -> list[str]:
 
 def spec_uit_body(body: str) -> str:
     """De opdrachttekst zonder de acceptatiechecklist."""
+    import re as _re
+
     zonder = _CHECKLIST.sub("", body or "")
     kop = _KOP.search(zonder)
     if kop:
         zonder = zonder[: kop.start()]
+    # Een kale regel 'Acceptatiecriteria:' zonder markdown-kop blijft anders als
+    # losse kop achter boven een lijst die er niet meer is.
+    zonder = _re.sub(r"(?im)^\s*acceptatiecriteria\s*:?\s*$", "", zonder)
     return zonder.strip()
 
 

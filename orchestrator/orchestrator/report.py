@@ -82,7 +82,19 @@ def pr_body(
     return redact_text("\n".join(lines), project.redact_patterns)
 
 
-def daily_digest(db: Database, slugs: list[str], day: str | None = None) -> str:
+
+def _pr_van_taak(scope, task_id: int) -> str:
+    """De laatst geopende pull request van deze taak, als die er is."""
+    rij = scope.conn.execute(
+        "SELECT payload FROM events WHERE project_id = ? AND task_id = ?"
+        " AND kind = 'pr-geopend' ORDER BY id DESC LIMIT 1",
+        (scope.project_id, task_id),
+    ).fetchone()
+    return json.loads(rij["payload"]).get("url", "") if rij else ""
+
+
+def daily_digest(db: Database, slugs: list[str], day: str | None = None,
+                 symbol: str = "$") -> str:
     day = day or date.today().isoformat()
     blocks: list[str] = [f"# Dagrapport {day}", ""]
     total_cost = 0.0
@@ -96,7 +108,7 @@ def daily_digest(db: Database, slugs: list[str], day: str | None = None) -> str:
         total_cost += spend
 
         blocks.append(f"## {slug}")
-        blocks.append(f"Kosten vandaag: €{spend:.2f}")
+        blocks.append(f"Kosten vandaag: {symbol}{spend:.4f}")
 
         blocks.append("\n**Geparkeerde vragen**")
         if parked:
@@ -121,10 +133,22 @@ def daily_digest(db: Database, slugs: list[str], day: str | None = None) -> str:
             blocks.append("- geen")
 
         blocks.append("\n**Afgerond / klaar voor review**")
-        blocks.extend([f"- {t['title']} ({t['status']})" for t in done] or ["- niets"])
+        if done:
+            for t in done:
+                pr = _pr_van_taak(scope, int(t["id"]))
+                blocks.append(f"- {t['title']} ({t['status']})"
+                              + (f" — {pr}" if pr else ""))
+                blocks.append(f"  samenvatting: `orchestrator summary {slug} {t['id']}`")
+        else:
+            blocks.append("- niets")
+
+        lopend = [t for t in scope.tasks()
+                  if t["status"] not in ("done", "pr_open", "failed", "blocked", "parked")]
+        blocks.append("\n**Onderhanden**")
+        blocks.extend([f"- {t['title']} ({t['status']})" for t in lopend] or ["- niets"])
         blocks.append("")
 
-    blocks.append(f"\n**Totale kosten vandaag: €{total_cost:.2f}**")
+    blocks.append(f"\n**Totale AI-kosten vandaag: {symbol}{total_cost:.4f}**")
     blocks.append(
         "\n_Antwoord op geparkeerde vragen door ze hier te beantwoorden of het"
         " bijbehorende issue te beantwoorden._"

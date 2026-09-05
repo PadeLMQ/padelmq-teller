@@ -172,7 +172,7 @@ def cmd_digest(args) -> int:
     settings = _settings()
     db = _db(settings)
     slugs = projects_mod.list_projects(settings)
-    text = daily_digest(db, slugs, day=args.day)
+    text = daily_digest(db, slugs, day=args.day, symbol=settings.symbol)
     if args.send:
         from .notify.email import EmailNotifier
 
@@ -401,6 +401,61 @@ def cmd_intake(args) -> int:
             continue
         for actie in intake(scope=db.scope(slug), project=project, client=GitHubClient()):
             print(f"{slug}: {actie}")
+    return 0
+
+
+def cmd_project_bootstrap(args) -> int:
+    """Zorgt dat de repositories van alle projecten lokaal bestaan.
+
+    Op een container is alles buiten het volume weg na een herstart. De
+    orkestrator werkt op lokale klonen, dus die moeten er weer zijn voordat er
+    iets kan draaien. Bestaat de kloon al, dan wordt hij bijgewerkt en niet
+    opnieuw gehaald: opnieuw klonen zou lopende worktrees wegvagen.
+    """
+    from .git import GitError, run_git
+
+    settings = _settings()
+    slugs = [args.project] if args.project else projects_mod.list_projects(settings)
+    fouten = 0
+    for slug in slugs:
+        project = projects_mod.load(settings, slug)
+        pad = Path(project.repo)
+        if not project.github_repo:
+            print(f"{slug}: geen github_repo ingesteld; overgeslagen")
+            continue
+        # De token staat in de git-credentials, niet in de URL: een URL belandt
+        # in .git/config en in logs.
+        url = f"https://github.com/{project.github_repo}.git"
+        try:
+            if (pad / ".git").exists():
+                run_git(pad, "fetch", "--quiet", "origin", check=False)
+                print(f"{slug}: bijgewerkt in {pad}")
+            else:
+                pad.parent.mkdir(parents=True, exist_ok=True)
+                run_git(pad.parent, "clone", "--quiet", url, str(pad))
+                print(f"{slug}: gekloond naar {pad}")
+        except GitError as exc:
+            fouten += 1
+            print(f"{slug}: MISLUKT — {exc}", file=sys.stderr)
+    return 1 if fouten else 0
+
+
+def cmd_summary(args) -> int:
+    """De leesbare samenvatting van één taak, met verwijzing naar het spoor."""
+    from .samenvatting import bouw, format_samenvatting
+
+    settings = _settings()
+    db = _db(settings)
+    s = bouw(db.scope(args.project), args.task)
+    if s is None:
+        print(f"taak {args.task} bestaat niet in {args.project}", file=sys.stderr)
+        return 1
+    tekst = format_samenvatting(s, settings.symbol)
+    if args.out:
+        Path(args.out).write_text(tekst, encoding="utf-8")
+        print(f"geschreven naar {args.out}")
+    else:
+        print(tekst)
     return 0
 
 
@@ -880,6 +935,10 @@ def build_parser() -> argparse.ArgumentParser:
     report.add_argument("--json", action="store_true")
     report.set_defaults(func=cmd_report)
 
+    boot = project.add_parser("bootstrap", help="zorg dat de repositories lokaal bestaan")
+    boot.add_argument("project", nargs="?")
+    boot.set_defaults(func=cmd_project_bootstrap)
+
     requeue = task.add_parser("requeue", help="een vastgelopen taak terug in de wachtrij")
     requeue.add_argument("project")
     requeue.add_argument("id", type=int)
@@ -896,6 +955,12 @@ def build_parser() -> argparse.ArgumentParser:
     serve.add_argument("--rounds", type=int, default=None,
                        help="stop na dit aantal rondes (standaard: eeuwig)")
     serve.set_defaults(func=cmd_serve)
+
+    sam = sub.add_parser("summary", help="leesbare samenvatting van een taak")
+    sam.add_argument("project")
+    sam.add_argument("task", type=int)
+    sam.add_argument("--out")
+    sam.set_defaults(func=cmd_summary)
 
     st = sub.add_parser("status", help="draait de dienst? (exit 0 = ja)")
     st.add_argument("--max-stilte", type=int, default=600,

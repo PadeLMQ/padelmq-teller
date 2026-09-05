@@ -71,5 +71,12 @@ class Rapporten(TempCase):
         self.assertIn("## beta", text)
         self.assertIn("Welke knoptekst?", text)
         self.assertIn("Btw incl?", text)
-        self.assertIn("€1.25", text)
-        self.assertIn("Totale kosten vandaag: €1.25", text)
+        # Geen harde euro meer: het teken volgt de ingestelde valuta, en de
+        # tarieven staan in dollar. Dat was de hele reden voor de valutafix.
+        self.assertIn("$1.2500", text)
+        self.assertIn("Totale AI-kosten vandaag: $1.2500", text)
+        self.assertNotIn("€", text)
+
+        # En met een andere valuta volgt het teken mee.
+        euro = daily_digest(self.db, ["alpha", "beta"], day="2026-09-05", symbol="€")
+        self.assertIn("€1.2500", euro)
