@@ -12,6 +12,7 @@ De Python-SDK is later een tweede adapter zonder wijziging aan de runner.
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 from pathlib import Path
 
@@ -66,6 +67,34 @@ OUTPUT_SCHEMA = {
     },
 }
 
+# De gereedschapskist van de uitvoerder. Kleiner dan dit kan hij zijn werk niet
+# meer doen: lezen en doorzoeken van de codebase hoort erbij, want een
+# uitvoerder die de code niet kan bekijken vult de rest in met vermoedens.
+BENODIGDE_TOOLS = ("Read", "Edit", "Write", "Glob", "Grep", "Bash")
+
+
+class ToolsetError(RuntimeError):
+    """De gereedschapskist klopt niet. Fail closed, geen ruimere tweede poging."""
+
+
+def tool_names(spec: str) -> list[str]:
+    """Haalt kale toolnamen uit een --allowedTools-opgave.
+
+    'Bash(git *)' beschrijft een toegestaan patroon; --tools wil alleen de naam
+    'Bash'. Zonder deze vertaling zou de ene vlag iets anders betekenen dan de
+    andere en zouden ze ongemerkt uit elkaar lopen.
+    """
+    # Eerst de patronen tussen haakjes weg: 'Bash(git *)' bevat een spatie en zou
+    # anders in twee stukken uiteenvallen.
+    kaal = re.sub(r"\([^)]*\)", "", spec)
+    namen = []
+    for deel in kaal.replace(",", " ").split():
+        naam = deel.strip()
+        if naam and naam not in namen:
+            namen.append(naam)
+    return namen
+
+
 SYSTEM_ADDITION = """
 Je werkt binnen een orkestrator die zonder toezicht draait.
 
@@ -92,6 +121,16 @@ class ClaudeExecutor:
     ):
         self.model = model
         self.allowed_tools = allowed_tools
+        ontbreekt = [t for t in BENODIGDE_TOOLS if t not in tool_names(allowed_tools)]
+        if ontbreekt:
+            # Fail closed. Stilzwijgend terugvallen op de volledige set zou het
+            # probleem oplossen door het duur te maken, en dat is precies de
+            # fout die hier hersteld is.
+            raise ToolsetError(
+                "de uitvoerder mist gereedschap dat hij nodig heeft: "
+                + ", ".join(ontbreekt)
+                + ". Er wordt niet teruggevallen op de volledige set."
+            )
         self.permission_mode = permission_mode
         self.timeout_seconds = timeout_seconds
         self.binary = binary
@@ -104,7 +143,13 @@ class ClaudeExecutor:
             "--json-schema", json.dumps(OUTPUT_SCHEMA),
             "--permission-mode", self.permission_mode,
             "--permission-prompts", "none",
+            # --allowedTools bepaalt wat de uitvoerder MAG; --tools bepaalt wat er
+            # überhaupt in zijn context geladen wordt. Dat is niet hetzelfde, en
+            # dat verschil kostte geld: verboden gereedschap werd nog steeds
+            # beschreven en betaald. De twee volgen nu uit dezelfde opgave, zodat
+            # ze niet uit elkaar kunnen lopen.
             "--allowedTools", self.allowed_tools,
+            "--tools", ",".join(tool_names(self.allowed_tools)),
             "--append-system-prompt", SYSTEM_ADDITION,
             # Geen MCP-servers uit de omgeving. Zonder deze vlag erft het
             # subproces alle toolbeschrijvingen van de sessie waarin de
