@@ -284,6 +284,7 @@ def _reviewer_auth_status() -> tuple[bool, str]:
 def cmd_serve(args) -> int:
     """Blijf draaien: herstellen, antwoorden ophalen, werk afwerken."""
     from .answers import process_answers
+    from .intake import intake
     from .notify.github import GitHubClient
     from .serve import Serve
 
@@ -301,6 +302,18 @@ def cmd_serve(args) -> int:
             for regel in uitkomst.regels():
                 print(f"[{slug}] herstel: {regel}")
             totaal += len(uitkomst.hervatte_taken) + len(uitkomst.verweesde_runs)
+        return totaal
+
+    def opdrachten() -> int:
+        totaal = 0
+        for slug in slugs:
+            project = projects_mod.load(settings, slug)
+            if not project.github_repo:
+                continue
+            for actie in intake(scope=db.scope(slug), project=project,
+                                client=GitHubClient()):
+                print(f"[{slug}] opdracht: {actie}")
+                totaal += 1
         return totaal
 
     def antwoorden() -> int:
@@ -330,7 +343,10 @@ def cmd_serve(args) -> int:
             gedaan += 1
         return gedaan
 
-    lus = Serve(recover_fn=herstel, poll_fn=antwoorden, work_fn=werk,
+    def binnenkomend() -> int:
+        return opdrachten() + antwoorden()
+
+    lus = Serve(recover_fn=herstel, poll_fn=binnenkomend, work_fn=werk,
                 interval=args.interval, on_event=lambda t: print(f"! {t}"))
     if settings.paused():
         print(f"noodstop actief ({settings.stop_file}); er wordt niets gedaan")
@@ -340,6 +356,22 @@ def cmd_serve(args) -> int:
         lus.run(rondes=args.rounds)
     except KeyboardInterrupt:
         print("\ngestopt")
+    return 0
+
+
+def cmd_intake(args) -> int:
+    from .intake import intake
+    from .notify.github import GitHubClient
+
+    settings = _settings()
+    db = _db(settings)
+    slugs = [args.project] if args.project else projects_mod.list_projects(settings)
+    for slug in slugs:
+        project = projects_mod.load(settings, slug)
+        if not project.github_repo:
+            continue
+        for actie in intake(scope=db.scope(slug), project=project, client=GitHubClient()):
+            print(f"{slug}: {actie}")
     return 0
 
 
@@ -785,7 +817,11 @@ def build_parser() -> argparse.ArgumentParser:
     requeue.add_argument("id", type=int)
     requeue.set_defaults(func=cmd_task_requeue)
 
-    serve = sub.add_parser("serve", help="blijf draaien: herstel, antwoorden, werk")
+    inn = sub.add_parser("intake", help="opdrachten uit GitHub-issues aannemen")
+    inn.add_argument("project", nargs="?")
+    inn.set_defaults(func=cmd_intake)
+
+    serve = sub.add_parser("serve", help="blijf draaien: herstel, opdrachten, antwoorden, werk")
     serve.add_argument("project", nargs="?")
     serve.add_argument("--interval", type=int, default=60,
                        help="seconden wachten na een stille ronde")

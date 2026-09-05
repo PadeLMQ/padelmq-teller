@@ -74,6 +74,31 @@ class GitHubClient:
                 out.append(comment)
         return out
 
+    def issues_with_label(self, repo: str, label: str) -> list[dict]:
+        """Open issues met dit label, oudste eerst.
+
+        Alleen issues: de GitHub-API geeft pull requests terug in dezelfde lijst,
+        en een PR is geen opdracht.
+        """
+        rijen = self._request(
+            "GET", f"/repos/{repo}/issues?state=open&labels={label}&sort=created&direction=asc"
+        )
+        return [r for r in rijen if "pull_request" not in r]  # type: ignore[union-attr]
+
+    def add_labels(self, repo: str, number: int, labels: list[str]) -> None:
+        self._request("POST", f"/repos/{repo}/issues/{number}/labels", {"labels": labels})
+
+    def issue_author_is_owner(self, repo: str, issue: dict) -> bool:
+        """Alleen de eigenaar mag werk opdragen.
+
+        Zonder deze controle kan iedereen die een issue mag openen de
+        orkestrator laten draaien op zijn rekening.
+        """
+        owner = repo.split("/", 1)[0].lower()
+        auteur = ((issue.get("user") or {}).get("login") or "").lower()
+        verband = (issue.get("author_association") or "").upper()
+        return auteur == owner or verband in {"OWNER", "MEMBER"}
+
     def create_pull_request(
         self, repo: str, title: str, body: str, head: str, base: str
     ) -> dict:
