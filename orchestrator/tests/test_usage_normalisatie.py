@@ -14,6 +14,11 @@ from orchestrator.adapters.claude import _usage_from_cli
 from orchestrator.config import ModelPrice
 from orchestrator.cost import Estimate
 
+try:
+    from tests.base import TempCase
+except ImportError:  # pragma: no cover
+    from base import TempCase
+
 TARIEF = ModelPrice(input_per_mtok=5.0, output_per_mtok=25.0, cached_input_per_mtok=0.5)
 
 
@@ -76,3 +81,35 @@ class GerapporteerdeKost(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class RunKosten(TempCase):
+    """Een run die $0 meldt terwijl er aanroepen in zitten, verbergt kosten."""
+
+    def test_end_run_telt_de_aanroepen_op(self):
+        from orchestrator import projects as projects_mod
+
+        projects_mod.add(self.settings, "p", str(self.make_repo("rk")))
+        scope = self.db.scope("p")
+        task_id = scope.add_task("t", "spec", ["a"])
+        run_id = scope.start_run(task_id, "task")
+        for bedrag in (0.25, 0.10):
+            scope.record_call(phase="implement", role="uitvoerder", model="reviewer-test",
+                              tokens_in=1, tokens_out=1, cached_in=0,
+                              cost_eur=bedrag, task_id=task_id, run_id=run_id,
+                              day="2026-09-05")
+        scope.end_run(run_id, "done")
+        rij = self.db.conn.execute(
+            "SELECT cost_eur FROM runs WHERE id = ?", (run_id,)).fetchone()
+        self.assertAlmostEqual(rij[0], 0.35)
+
+    def test_expliciet_bedrag_gaat_voor(self):
+        from orchestrator import projects as projects_mod
+
+        projects_mod.add(self.settings, "q", str(self.make_repo("rk2")))
+        scope = self.db.scope("q")
+        run_id = scope.start_run(scope.add_task("t", "s", ["a"]), "task")
+        scope.end_run(run_id, "done", cost_eur=1.5)
+        rij = self.db.conn.execute(
+            "SELECT cost_eur FROM runs WHERE id = ?", (run_id,)).fetchone()
+        self.assertAlmostEqual(rij[0], 1.5)

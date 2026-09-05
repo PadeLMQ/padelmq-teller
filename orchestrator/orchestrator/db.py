@@ -423,7 +423,21 @@ class ProjectScope:
         )
         return int(cur.lastrowid)
 
-    def end_run(self, run_id: int, outcome: str, cost_eur: float = 0.0) -> None:
+    def end_run(self, run_id: int, outcome: str, cost_eur: float | None = None) -> None:
+        """Sluit de run af. Zonder bedrag telt hij zijn eigen aanroepen op.
+
+        Elke aanroeper moest de kosten anders zelf meegeven en deed dat nergens,
+        waardoor elke run $0 rapporteerde terwijl de losse aanroepen wel klopten.
+        De som staat al in de database; die hoeft niemand door te geven.
+        """
+        if cost_eur is None:
+            cost_eur = float(
+                self.conn.execute(
+                    "SELECT COALESCE(SUM(cost_eur), 0) FROM calls"
+                    " WHERE run_id = ? AND project_id = ?",
+                    (run_id, self.project_id),
+                ).fetchone()[0]
+            )
         self.conn.execute(
             "UPDATE runs SET ended_at = ?, outcome = ?, cost_eur = ?"
             " WHERE id = ? AND project_id = ?",

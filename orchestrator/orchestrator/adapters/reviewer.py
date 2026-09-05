@@ -165,7 +165,16 @@ class OpenAIReviewer:
                 raise RuntimeError(
                     "pakket 'openai' ontbreekt; installeer het of draai met een andere reviewer"
                 ) from exc
-            self._client = OpenAI()
+            # Staat er geen sleutel in de omgeving, dan hoort dat zo in een
+            # opzet waar een credential-proxy de Authorization-header buiten
+            # deze runtime injecteert. De SDK eist alleen DAT er een waarde is,
+            # niet dat die geldig is; de proxy vervangt de header. Deze
+            # placeholder is dus geen geheim en geen stille terugval op een
+            # andere route -- zonder proxy faalt de aanroep gewoon met 401.
+            import os
+
+            sleutel = os.environ.get("OPENAI_API_KEY") or "placeholder-credential-proxy"
+            self._client = OpenAI(api_key=sleutel)
         return self._client
 
     def _call(self, system: str, user: str, schema: dict, name: str,
