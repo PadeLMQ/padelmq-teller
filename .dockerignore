@@ -1,0 +1,11 @@
+# De bouwcontext klein houden: alleen wat het image nodig heeft.
+.git
+.github
+docs
+index.html
+CNAME
+LEESMIJ.md
+README.md
+update_teller.py
+**/__pycache__
+**/*.pyc

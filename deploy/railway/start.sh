@@ -32,8 +32,12 @@ fi
 echo "== repositories =="
 python3 -m orchestrator.cli project bootstrap || echo "   let op: niet elke repository is beschikbaar"
 
+# Eén rapport met OK/FOUT per onderdeel: datamap, github-auth, openai,
+# claude-cli en doctor. Faalt er iets, dan stopt het hier met een regel die
+# zegt wát er mis is. Railway herstart dan; wat je niet krijgt is een dienst
+# die "Active" heet en zwijgt.
 echo "== controle vooraf =="
-python3 -m orchestrator.cli doctor
+python3 -m orchestrator.cli startup
 
 echo "== draaien =="
 exec python3 -m orchestrator.cli serve --interval "${ORCH_INTERVAL:-120}"

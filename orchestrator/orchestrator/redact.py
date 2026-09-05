@@ -17,6 +17,10 @@ _PATTERNS = [
     # Bekende sleutelvormen.
     (re.compile(r"\bshpat_[A-Za-z0-9]+"), "<geredigeerd:shopify-token>"),
     (re.compile(r"\bsk-[A-Za-z0-9_\-]{16,}"), "<geredigeerd:api-sleutel>"),
+    # Ook de door de leverancier gemaskeerde vorm (sk-proj-*****). Die bevat
+    # geen volledige sleutel, maar wel het begin ervan, en het begin van een
+    # sleutel hoort net zo min in een logboek als het geheel.
+    (re.compile(r"\bsk-[A-Za-z0-9_\-]*\*+[A-Za-z0-9_\-*]*"), "<geredigeerd:api-sleutel>"),
     (re.compile(r"\bgh[pousr]_[A-Za-z0-9]{16,}"), "<geredigeerd:github-token>"),
     (re.compile(r"-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----"),
      "<geredigeerd:private-key>"),

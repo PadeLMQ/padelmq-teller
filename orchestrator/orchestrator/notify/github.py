@@ -49,6 +49,15 @@ class GitHubClient:
         except urllib.error.HTTPError as exc:
             raise GitHubError(f"{method} {path} gaf {exc.code}: {exc.read().decode()[:400]}") from exc
 
+    def whoami(self) -> str:
+        """De login waarmee we bij GitHub binnenkomen.
+
+        Bewijst dat de token geldig is, wat 'de variabele is gezet' niet doet.
+        Alleen de login komt terug; de token blijft binnen dit object.
+        """
+        rij = self._request("GET", "/user")
+        return str(rij.get("login") or "(onbekende login)")  # type: ignore[union-attr]
+
     def create_issue(self, repo: str, title: str, body: str, labels: list[str]) -> int:
         result = self._request(
             "POST", f"/repos/{repo}/issues",

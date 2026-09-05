@@ -288,6 +288,47 @@ def _reviewer_auth_status() -> tuple[bool, str]:
     aantal = len(getattr(modellen, "data", []) or [])
     return True, f"OK via {bron} ({aantal} modellen zichtbaar, gratis eindpunt)"
 
+def _opstartrapport(settings, *, met_doctor: bool):
+    """Bouwt het rapport dat bij elke start in de log komt."""
+    from .notify.github import GitHubClient
+    from .opstart import (Rapport, controleer_claude, controleer_datamap,
+                          controleer_doctor, controleer_github, controleer_openai)
+
+    slugs = projects_mod.list_projects(settings)
+    repos = []
+    for slug in slugs:
+        try:
+            repo = projects_mod.load(settings, slug).github_repo
+        except Exception:  # noqa: BLE001 - een kapot projectbestand mag de start niet slopen
+            continue
+        if repo:
+            repos.append(repo)
+
+    rapport = Rapport()
+    rapport.controles.append(controleer_datamap(settings.data_dir))
+    rapport.controles.append(controleer_github(GitHubClient, repos))
+    rapport.controles.append(controleer_openai(_reviewer_auth_status))
+    rapport.controles.append(controleer_claude())
+    if met_doctor:
+        rapport.controles.append(controleer_doctor(lambda: cmd_doctor(None)))
+    return rapport
+
+
+def cmd_startup(args) -> int:
+    """Zegt per onderdeel OK of FOUT, zodat 'Active' nooit meer stilte betekent.
+
+    Draait bewust vóór serve en apart aanroepbaar: gaat er iets mis, dan staat
+    het in de log als een regel met FOUT, niet als het uitblijven van uitvoer.
+    """
+    from .opstart import format_rapport
+
+    settings = _settings()
+    print("[BOOT] orchestrator start op", flush=True)
+    rapport = _opstartrapport(settings, met_doctor=not args.zonder_doctor)
+    print(format_rapport(rapport, versie=__version__), flush=True)
+    return 0 if rapport.ok else 1
+
+
 def cmd_serve(args) -> int:
     """Blijf draaien: herstellen, antwoorden ophalen, werk afwerken."""
     from .answers import process_answers
@@ -362,6 +403,8 @@ def cmd_serve(args) -> int:
     teller = {"rondes": 0, "fout": None}
 
     def klop(ronde) -> None:
+        from .opstart import hartslagregel
+
         teller["rondes"] += 1
         werk = None
         if ronde.taken or ronde.antwoorden or ronde.hersteld:
@@ -369,6 +412,10 @@ def cmd_serve(args) -> int:
                     f" {ronde.hersteld} hersteld")
         db.heartbeat(gestart_op=gestart, rondes=teller["rondes"], werk=werk,
                      fout=teller["fout"], pid=os.getpid(), host=socket.gethostname())
+        # De database weet nu dat we leven, maar Railway toont alleen de log.
+        # Daarom ook daar een regel per ronde, juist als er niets gebeurde.
+        print(hartslagregel(teller["rondes"], ronde, tijd=_now(),
+                            interval=args.interval), flush=True)
         teller["fout"] = None
 
     def gemeld(tekst: str) -> None:
@@ -380,7 +427,8 @@ def cmd_serve(args) -> int:
     if settings.paused():
         print(f"noodstop actief ({settings.stop_file}); er wordt niets gedaan")
         return 1
-    print(f"draait, ronde elke {args.interval}s bij stilte. Ctrl-C om te stoppen.")
+    print(f"[OK  ] serve        gestart voor {', '.join(slugs)}; ronde elke "
+          f"{args.interval}s bij stilte", flush=True)
     try:
         lus.run(rondes=args.rounds)
     except KeyboardInterrupt:
@@ -974,6 +1022,11 @@ def build_parser() -> argparse.ArgumentParser:
 
     doctor = sub.add_parser("doctor", help="omgeving controleren")
     doctor.set_defaults(func=cmd_doctor)
+
+    op = sub.add_parser("startup", help="opstartcontrole met OK/FOUT per onderdeel")
+    op.add_argument("--zonder-doctor", action="store_true",
+                    help="alleen de losse controles, doctor overslaan")
+    op.set_defaults(func=cmd_startup)
 
     return parser
 
