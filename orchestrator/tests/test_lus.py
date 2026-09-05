@@ -350,3 +350,37 @@ class Hervatten(Lus):
                   if r["kind"] == "verificatie-rommel"]
         self.assertTrue(events, "het opruimen is niet vastgelegd")
         self.assertIn("app.py", json.loads(events[0]["payload"])["bestanden"])
+
+    def test_reviewerfeedback_bereikt_de_volgende_ronde(self):
+        """Zonder dit krijgt de uitvoerder dezelfde prompt en verandert er niets."""
+        from orchestrator.adapters import Finding, ReviewResult
+        from orchestrator.models import Verdict
+
+        revise = ReviewResult(
+            verdict=Verdict.REVISE,
+            findings=[Finding(severity="major", file="tests/x.test.ts",
+                              issue="test toetst meer dan gevraagd",
+                              fix="beperk tot de acceptatiecriteria")],
+            next_instruction="Versmal de test tot de acceptatiecriteria.",
+        )
+        runner = self.build(
+            steps=[{"write": {"a.py": "x = 1\n"}}, {"write": {"a.py": "x = 2\n"}}],
+            reviews=[revise, ReviewResult(verdict=Verdict.PASS)],
+        )
+        task_id = self.task(runner)
+
+        eerste = runner.run_task(task_id)
+        self.assertEqual(eerste.status, TaskStatus.QUEUED)
+
+        tweede = runner.run_task(task_id)
+        self.assertEqual(tweede.status, TaskStatus.PR_OPEN)
+
+        prompt = self.executor.calls[-1]
+        self.assertIn("Herziening gevraagd door de beoordelaar", prompt)
+        self.assertIn("Versmal de test tot de acceptatiecriteria.", prompt)
+        self.assertIn("test toetst meer dan gevraagd", prompt)
+        self.assertIn("GERICHTE CORRECTIE", prompt)
+        self.assertNotIn(
+            "Herziening gevraagd", self.executor.calls[0],
+            "de eerste ronde had nog geen feedback mogen bevatten",
+        )

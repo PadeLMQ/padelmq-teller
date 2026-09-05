@@ -38,6 +38,7 @@ CREATE TABLE IF NOT EXISTS tasks (
     reviewer_response_id TEXT,
     iterations    INTEGER NOT NULL DEFAULT 0,
     review_rounds INTEGER NOT NULL DEFAULT 0,
+    review_feedback TEXT,
     cost_eur      REAL NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL
@@ -197,6 +198,19 @@ class Database:
         self.conn = _GedeeldeVerbinding(raw)
         self.conn.execute("PRAGMA foreign_keys = ON")
         self.conn.executescript(SCHEMA)
+        self._migreer()
+
+    def _migreer(self) -> None:
+        """Kolommen bijzetten die na een bestaande database zijn toegevoegd.
+
+        CREATE TABLE IF NOT EXISTS raakt een bestaande tabel niet aan, dus een
+        nieuwe kolom komt er anders nooit bij en oude datamappen breken.
+        """
+        bestaand = {
+            r["name"] for r in self.conn.execute("PRAGMA table_info(tasks)")
+        }
+        if "review_feedback" not in bestaand:
+            self.conn.execute("ALTER TABLE tasks ADD COLUMN review_feedback TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -316,7 +330,7 @@ class ProjectScope:
         allowed = {
             "status", "spec", "acceptance", "priority", "depends_on",
             "blocked_by_question", "claude_session_id", "reviewer_response_id",
-            "iterations", "review_rounds", "cost_eur",
+            "iterations", "review_rounds", "cost_eur", "review_feedback",
         }
         unknown = set(fields) - allowed
         if unknown:
