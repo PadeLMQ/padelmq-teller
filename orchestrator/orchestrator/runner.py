@@ -494,6 +494,30 @@ class Runner:
             besluit=("bestaand werk hergebruikt" if verification.ok
                      else "bestaand werk voldoet niet; opnieuw implementeren"),
         )
+        # Exitcode 127 is "command not found": de check kon niet draaien. Dat zegt
+        # niets over het werk, alleen over de omgeving -- een verse worktree
+        # zonder geinstalleerde afhankelijkheden, bijvoorbeeld. Dat verschil
+        # bepaalt of er betaald wordt voor een nieuwe implementatieronde, dus het
+        # mag niet op een gok berusten: onuitvoerbaar is niet hetzelfde als rood.
+        onuitvoerbaar = [c.name for c in verification.checks if c.exit_code == 127]
+        if onuitvoerbaar:
+            detail = (
+                "de verificatie kon niet draaien in de worktree ("
+                + ", ".join(onuitvoerbaar)
+                + " gaven exitcode 127, commando niet gevonden). Zonder werkende"
+                " verificatie is niet vast te stellen of het bestaande werk"
+                " voldoet, en dan wordt er niet opnieuw geimplementeerd."
+            )
+            self.scope.set_task(task_id, status=TaskStatus.BLOCKED.value)
+            self._log("verificatie-onuitvoerbaar", task_id=task_id,
+                      checks=onuitvoerbaar, detail=detail)
+            self.notifier.send(Message(
+                subject="Verificatie kon niet draaien",
+                body=detail, project=self.project.slug, urgent=True,
+                labels=["orch:block"],
+            ))
+            return RunOutcome(TaskStatus.BLOCKED, detail)
+
         if self.project.checks and not verification.ok:
             return None
         return self._review_phase(task_id, run_id, task, acceptance, worktree, verification)

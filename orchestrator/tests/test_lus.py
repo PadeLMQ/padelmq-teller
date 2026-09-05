@@ -284,3 +284,40 @@ class Hervatten(Lus):
             beoordeling[0]["diff_tekens"], 0,
             "de beoordelaar kreeg een lege diff terwijl er werk vastligt",
         )
+
+    def test_onuitvoerbare_verificatie_blokkeert_en_implementeert_niet_opnieuw(self):
+        """Exitcode 127 is 'commando niet gevonden': de omgeving, niet het werk.
+
+        Dit gebeurde echt: een verse worktree zonder node_modules gaf 127, de
+        orkestrator las dat als 'werk voldoet niet' en betaalde $0,30 voor een
+        nieuwe implementatie van werk dat al klaar was.
+        """
+        # Een script dat alleen in de repo staat en niet in de worktree, net
+        # zoals node_modules: de baseline is groen, de worktree geeft 127.
+        runner = self.build(
+            checks={"tests": "./deps/tool.sh"},
+            steps=[{"write": {"nooit.py": "had niet mogen draaien\n"}}],
+        )
+        deps = self.project.repo_root / "deps"
+        deps.mkdir()
+        tool = deps / "tool.sh"
+        tool.write_text("#!/bin/sh\nexit 0\n", encoding="utf-8")
+        tool.chmod(0o755)
+        (self.project.repo_root / ".gitignore").write_text("deps/\n", encoding="utf-8")
+        run_git(self.project.repo_root, "add", "-A")
+        run_git(self.project.repo_root, "-c", "user.name=t", "-c", "user.email=t@t",
+                "commit", "-q", "-m", "negeer deps")
+
+        task_id = self.task(runner)
+        self._leg_werk_klaar(runner, task_id)
+
+        outcome = runner.run_task(task_id)
+
+        self.assertEqual(outcome.status, TaskStatus.BLOCKED)
+        self.assertEqual(
+            len(self.executor.calls), 0,
+            "er is opnieuw betaald voor implementatie terwijl de verificatie niet kon draaien",
+        )
+        events = [r for r in self.scope.events(limit=50)
+                  if r["kind"] == "verificatie-onuitvoerbaar"]
+        self.assertTrue(events, "de onuitvoerbare verificatie is niet vastgelegd")
