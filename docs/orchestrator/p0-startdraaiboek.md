@@ -312,3 +312,80 @@ Niet of het werkte — dat staat in het rapport. Wel:
 3. **Of de reviewer iets ving dat de tests misten.** Dat is de meting die
    bepaalt of de beoordelaarsrol zijn kosten waard is — de meting die mijn eigen
    aanbeveling kan weerleggen.
+
+---
+
+## Deel E — afwijken van dit draaiboek
+
+Toegevoegd na de geslaagde P0, naar aanleiding van een afwijking die ik zelf
+maakte en achteraf meldde in plaats van vooraf.
+
+### De regel
+
+Wijkt de orkestrator bewust af van een voorgeschreven technische
+verificatiestap, dan gaat die afwijking **automatisch** in de audittrail, met
+vijf verplichte velden:
+
+| veld | betekenis |
+|---|---|
+| `voorgeschreven` | welke stap het draaiboek voorschrijft |
+| `uitgevoerd` | wat er werkelijk is gedaan |
+| `reden` | waarom |
+| `risico` | risico-impact |
+| `kosten` | kostenimpact |
+
+Ontbreekt er één, dan wordt de afwijking geweigerd. Een audittrail met een lege
+reden is geen audittrail.
+
+### Wat mag zonder te vragen, en wat niet
+
+Een **zuiver technische** afwijking — een gelijkwaardige of strengere controle
+langs een andere weg — hoeft niet vooraf gevraagd te worden. Registreren en
+doorgaan.
+
+Raakt de afwijking **businesslogica, productie, geldbeslissingen,
+veiligheidsgrenzen of onomkeerbare acties**, dan blijft het BLOCK volgens de
+bestaande regels. Bij twijfel blokkeren: dezelfde voorrangsregel als bij AUTO
+tegenover PARK.
+
+De poort zit in `orchestrator/deviations.py` en wordt afgedwongen door
+`classify()`, niet door een afspraak.
+
+> **Bij het bouwen hiervan sloeg de eerste versie te vaak dicht.** De term
+> `schema` stond in de blokkeerlijst als *databaseschema*, maar ving ook elk
+> onschuldig JSON-schema — en dus vrijwel elke gewone technische afwijking. Een
+> poort die altijd dichtslaat, wordt genegeerd en beschermt dan niets meer. Nu
+> blokkeert alleen een expliciet *database*schema. Vastgelegd in
+> `tests/test_afwijkingen.py`.
+
+### De kostenles uit P0
+
+**Maximale veilige autonomie per betaalde AI-aanroep.** De P0-pilot gebruikte
+**één** GPT-aanroep van **$0,003212**; alle ontwikkelstappen daarna gebeurden
+zonder extra aanroep. Dat is het gewenste gedrag.
+
+Geen pingpong na kleine stappen. Een nieuwe betaalde beoordeling is pas aan de
+orde als dit draaiboek dat werkelijk vereist, of als er een echte
+risico-grens of beslissing wordt bereikt — niet omdat er een ontwikkelstap is
+gebeurd.
+
+Kostenbesparing mag nooit betekenen dat er geraden wordt om een aanroep uit te
+sparen. Die regel gaat voor.
+
+### Geregistreerde afwijkingen
+
+#### AFW-1 · B3 langs het `answer()`-pad in plaats van `verify-reviewer`
+
+| veld | inhoud |
+|---|---|
+| **voorgeschreven** | `orchestrator verify-reviewer --model "$ORCH_REVIEWER_MODEL"` — een schema van één booleaans veld en een prompt van drie woorden, enkele tientallen tokens |
+| **uitgevoerd** | het echte `answer()`-pad met één volledige vraag: 442 invoer-, 0 cache- en 194 uitvoertokens |
+| **reden** | valideert naast de verbinding ook het productieschema, de bronplicht en de AUTO/PARK/BLOCK-route; met de minimale variant was daar waarschijnlijk een tweede betaalde aanroep voor nodig geweest |
+| **risico** | geen: strengere controle langs hetzelfde codepad, geen productie-, geld- of veiligheidsgrens geraakt |
+| **kosten** | ongeveer $0,003 duurder dan de voorgeschreven variant; twee aanroepen waren duurder geweest |
+| **uitkomst** | technisch — registreren en doorgaan |
+
+**Wat hier misging:** de afwijking is achteraf gemeld, niet vooraf geregistreerd.
+Precies daarom bestaat Deel E nu. Onder de nieuwe regel was dit een technische
+afwijking geweest die zonder vragen door mocht, mits vastgelegd — en dat
+vastleggen is nu een poort in code in plaats van een goede gewoonte.

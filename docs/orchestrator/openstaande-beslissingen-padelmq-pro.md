@@ -85,3 +85,63 @@ ontleedfout af, waarna `json.data` `undefined` is en de aanroeper struikelt over
 een ontbrekend veld. Het gedrag is **veilig** — er wordt niets geschreven en er
 wordt geworpen — maar de melding is verwarrend. Vastgelegd in
 `tests/shopify.test.ts`. Opruimen kan later; het is geen risico.
+
+---
+
+## P-1 · `dateShort()` toonde geen jaartal — **BESLIST, opgelost**
+
+**Waar:** `src/lib/format.ts`, `dateShort`.
+
+Zonder jaartal renderden `02/01/2019` en `02/01/2026` allebei als
+`02/01, 08:05`. Een oude regel was daardoor niet van een verse te
+onderscheiden.
+
+**Beslissing (P0, goedgekeurd):** binnen het huidige jaar blijft het jaartal
+weg, want daar is het ruis. Bij een datum uit een ander jaar wordt het jaartal
+getoond: `02/01/2019, 08:05`.
+
+**Status:** geïmplementeerd en getest in `tests/format.test.ts`, PR #3.
+Dekking `format.ts` 0% → 100%. Geen betaalde AI-aanroep gebruikt.
+
+---
+
+## P-2 · Geen ESLint-configuratie — **PARK**
+
+**Waar:** de repository als geheel.
+
+`npm run lint` draait `next lint`, maar er staat geen ESLint-configuratie in de
+repo en `eslint` staat niet bij de dependencies. Het commando vraagt interactief
+om een setup en eindigt op exit 1.
+
+Geverifieerd op onaangeraakte `main`: **identieke fout**. Dit is dus een
+bestaande projectbrede configuratiekeuze en geen defect dat door de pilot is
+veroorzaakt.
+
+**Waarom geparkeerd:** welke configuratie (`strict` of `base`) en welke
+regelset er komt, bepaalt hoeveel bestaande code er in één klap rood kleurt.
+Dat is een keuze van de eigenaar, niet van een model.
+
+**Gevolg zolang dit open staat:** `lint` kan nooit groen zijn. Zet het niet als
+harde check aan in de orkestratorconfiguratie van dit project, anders faalt elke
+run op een reden die niets met de taak te maken heeft.
+
+---
+
+## P-3 · `gpt-5.6-terra` is een niet-gedateerde alias — **PARK, na P0**
+
+**Waar:** de kostenconfiguratie van de orkestrator, niet de pilotrepo.
+
+In de modellenlijst hebben oudere modellen een gedateerde snapshot
+(`gpt-5.4-2026-03-05`, `gpt-5.5-2026-04-23`). `gpt-5.6-terra` heeft die niet en
+is dus vermoedelijk een alias die naar een nieuwe onderliggende versie kan
+verschuiven.
+
+**Het risico:** de tarieven staan statisch in de omgeving
+(`ORCH_REVIEWER_PRICE_IN` en verwanten). Verlegt de aanbieder de alias en
+wijzigen de tarieven mee, dan blijft de boekhouding stilzwijgend rekenen met
+verouderde bedragen. Er is niets dat dat signaleert.
+
+**Nog niet opgelost, bewust.** Een eenvoudige fail-safe hoort hier: bijvoorbeeld
+het modelantwoord vergelijken met het model dat we dachten aan te roepen, en de
+tarieven van een houdbaarheidsdatum voorzien. Dat ontwerp komt na P0 en mag de
+hoofdroute niet blokkeren.
