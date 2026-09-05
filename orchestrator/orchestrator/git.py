@@ -33,6 +33,17 @@ class Worktree:
     def diff(self, base: str) -> str:
         return run_git(self.path, "diff", f"{base}...HEAD")
 
+    def full_diff(self, base: str) -> str:
+        """Alles wat deze branch verandert ten opzichte van base.
+
+        Dus vastgelegd EN nog niet vastgelegd werk. De beoordelaar moet het
+        geheel zien: bij een hervatte taak staat alles al in een commit en zou
+        een diff van alleen de werkmap leeg zijn. Een beoordelaar die niets
+        ziet, keurt alles goed.
+        """
+        run_git(self.path, "add", "-A", "-N")
+        return run_git(self.path, "diff", base)
+
     def uncommitted_diff(self) -> str:
         """Diff inclusief nieuwe bestanden.
 
@@ -80,9 +91,19 @@ class GitAdapter:
     def remove_worktree(self, worktree: Worktree) -> None:
         run_git(worktree.repo, "worktree", "remove", "--force", str(worktree.path), check=False)
 
-    def commit(self, worktree: Worktree, message: str, author: str) -> str:
+    def commit(self, worktree: Worktree, message: str, author: str,
+               base: str | None = None) -> str:
         run_git(worktree.path, "add", "-A")
         if not run_git(worktree.path, "status", "--porcelain").strip():
+            # Bij een hervatte taak staat het werk al in een commit. Dan is er
+            # niets te committen omdat het al gebeurd is, en dat is geen fout:
+            # we geven de bestaande kop terug. Alleen als er ook ten opzichte
+            # van base niets staat, is er werkelijk niets gedaan.
+            if base is not None:
+                aantal = run_git(worktree.path, "rev-list", "--count",
+                                 f"{base}..HEAD", check=False).strip()
+                if aantal.isdigit() and int(aantal) > 0:
+                    return run_git(worktree.path, "rev-parse", "HEAD").strip()
             raise GitError("niets te committen")
         name, _, email = author.partition("<")
         run_git(

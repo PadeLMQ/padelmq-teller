@@ -18,7 +18,7 @@ from .adapters.reviewer import validate_verdict
 from .config import Settings
 from .cost import BudgetExceeded, CostGuard, Estimate, InconsistentUsage
 from .db import ProjectScope
-from .git import GitAdapter, GitError
+from .git import GitAdapter, GitError, run_git
 from .guards import NoProgressDetector, detect_invented_values
 from .models import (
     Question, TaskStatus, Triage, TriageResult, VerificationResult, Verdict,
@@ -246,6 +246,12 @@ class Runner:
                 self.project.repo_root, branch, self.project.default_branch
             )
 
+            # 0b · is er nog bruikbaar werk van een eerdere poging?
+            hervat = self._resume_phase(task_id, run_id, task, acceptance, worktree)
+            if hervat is not None:
+                self.scope.end_run(run_id, hervat.status.value)
+                return hervat
+
             pending: list[Question] = []
             for _ in range(self.project.strength.max_implement_iterations):
                 # 1 · beantwoorden
@@ -454,6 +460,44 @@ class Runner:
             )
         return None
 
+    def _resume_phase(self, task_id: int, run_id: int, task, acceptance: list[str],
+                      worktree) -> RunOutcome | None:
+        """Kijkt of het werk van een eerdere poging nog voldoet.
+
+        Zonder deze controle roept de lus de uitvoerder onvoorwaardelijk aan en
+        betaal je opnieuw voor werk dat er al staat. Dat is niet alleen duur:
+        na een beantwoorde BLOCK-vraag is het bestaande werk juist meestal nog
+        goed, want de vraag ging over of het klopte, niet over of het bestond.
+
+        De harde verificatie beslist, niet een inschatting. Is de uitslag groen,
+        dan gaat het werk door naar de beoordeling. Is ze rood, dan valt de lus
+        terug op een gewone implementatieronde.
+
+        Geeft None terug als er niets te hervatten valt.
+        """
+        base = self.project.default_branch
+        aantal = run_git(worktree.path, "rev-list", "--count", f"{base}..HEAD",
+                         check=False).strip()
+        if not aantal.isdigit() or int(aantal) == 0:
+            return None
+
+        self.scope.set_task(task_id, status=TaskStatus.VERIFYING.value)
+        verification = self.verifier.run(worktree.path, self.project.checks)
+        self._log(
+            "hervatting", task_id=task_id, commits=int(aantal), ok=verification.ok,
+            checks=[
+                {"naam": c.name, "commando": c.command, "exitcode": c.exit_code,
+                 "geslaagd": c.ok}
+                for c in verification.checks
+            ],
+            gefaald=[c.name for c in verification.failed],
+            besluit=("bestaand werk hergebruikt" if verification.ok
+                     else "bestaand werk voldoet niet; opnieuw implementeren"),
+        )
+        if self.project.checks and not verification.ok:
+            return None
+        return self._review_phase(task_id, run_id, task, acceptance, worktree, verification)
+
     def _review_phase(
         self, task_id: int, run_id: int, task, acceptance: list[str], worktree,
         verification: VerificationResult,
@@ -467,7 +511,10 @@ class Runner:
         review: ReviewResult | None = None
         if self.reviewer is not None and self.project.reviewer_enabled:
             self._preflight(self.settings.reviewer_model, task_id, run_id, 25000, 4000)
-            diff = redact_diff(worktree.uncommitted_diff(), self.project.redact_patterns)
+            diff = redact_diff(
+                worktree.full_diff(self.project.default_branch),
+                self.project.redact_patterns,
+            )
             context = redact_text(self._knowledge_context(), self.project.redact_patterns)
             self._log_context(task_id, "beoordelen", context, {
                 "diff_tekens": len(diff),
@@ -532,6 +579,7 @@ class Runner:
                 worktree,
                 self._commit_message(task, verification),
                 "orchestrator <bot@padelmq.be>",
+                base=self.project.default_branch,
             )
             self._log("commit", task_id=task_id, sha=sha, branch=worktree.branch)
         except GitError as exc:

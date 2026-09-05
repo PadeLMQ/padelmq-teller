@@ -191,3 +191,96 @@ class Lus(TempCase):
         self.settings.stop_file.write_text("stop\n", encoding="utf-8")
         with self.assertRaises(Paused):
             runner.run_task(self.scope.add_task("A", acceptance=["werkt"]))
+
+
+class Hervatten(Lus):
+    """Bruikbaar werk van een eerdere poging mag niet opnieuw betaald worden."""
+
+    def _leg_werk_klaar(self, runner, task_id, bestand="eerder.py", inhoud="# poging 1\n"):
+        """Bootst een eerdere poging na: een commit op orch/<id>."""
+        worktree = runner.git.create_worktree(
+            self.project.repo_root, f"orch/{task_id}", self.project.default_branch
+        )
+        (worktree.path / bestand).write_text(inhoud, encoding="utf-8")
+        sha = runner.git.commit(worktree, "werk uit de eerste poging", "t <t@t>")
+        runner.git.remove_worktree(worktree)
+        return sha
+
+    def test_groen_bestaand_werk_wordt_hergebruikt_zonder_uitvoerder(self):
+        runner = self.build(steps=[{"write": {"nooit.py": "had niet mogen draaien\n"}}])
+        task_id = self.task(runner)
+        sha = self._leg_werk_klaar(runner, task_id)
+
+        outcome = runner.run_task(task_id)
+
+        self.assertEqual(
+            len(self.executor.calls), 0,
+            "de uitvoerder is aangeroepen terwijl het bestaande werk groen was",
+        )
+        self.assertEqual(outcome.status, TaskStatus.PR_OPEN)
+        kop = run_git(self.project.repo_root, "rev-parse", f"orch/{task_id}").strip()
+        self.assertEqual(kop, sha, "de eerdere commit is niet hergebruikt")
+
+    def test_de_beslissing_staat_in_de_audittrail(self):
+        runner = self.build()
+        task_id = self.task(runner)
+        self._leg_werk_klaar(runner, task_id)
+        runner.run_task(task_id)
+
+        events = [r for r in self.scope.events(limit=50) if r["kind"] == "hervatting"]
+        self.assertTrue(events, "de hervatting is niet vastgelegd")
+        payload = json.loads(events[0]["payload"])
+        self.assertTrue(payload["ok"])
+        self.assertEqual(payload["commits"], 1)
+        self.assertIn("hergebruikt", payload["besluit"])
+        self.assertTrue(payload["checks"], "de gedraaide checks ontbreken in de audittrail")
+
+    def test_rood_bestaand_werk_valt_terug_op_implementeren(self):
+        """Voldoet het oude werk niet, dan moet de uitvoerder alsnog draaien.
+
+        De check is groen op main en rood zodra stuk.txt bestaat. De baseline
+        blijft dus groen, terwijl de eerdere poging rood staat.
+        """
+        # groen op main (geen stuk.txt), rood zodra stuk.txt bestaat, en weer
+        # groen zodra fix.txt ernaast staat. Zo blijft de baseline groen terwijl
+        # de eerdere poging rood is, en kan de uitvoerder het met schrijven
+        # herstellen.
+        check = (
+            "python3 -c \"import pathlib,sys; sys.exit(0 if (not "
+            "pathlib.Path('stuk.txt').exists()) or pathlib.Path('fix.txt').exists() "
+            "else 1)\""
+        )
+        runner = self.build(checks={"tests": check},
+                            steps=[{"write": {"fix.txt": "hersteld\n"}}])
+        task_id = self.task(runner)
+        self._leg_werk_klaar(runner, task_id, bestand="stuk.txt", inhoud="kapot\n")
+
+        outcome = runner.run_task(task_id)
+
+        self.assertEqual(len(self.executor.calls), 1, "de uitvoerder had moeten draaien")
+        self.assertEqual(outcome.status, TaskStatus.PR_OPEN)
+
+    def test_zonder_eerder_werk_verandert_er_niets(self):
+        runner = self.build(steps=[{"write": {"app.py": "x = 1\n"}}])
+        task_id = self.task(runner)
+        runner.run_task(task_id)
+        self.assertEqual(len(self.executor.calls), 1)
+
+    def test_de_beoordelaar_ziet_ook_al_vastgelegd_werk(self):
+        """Een lege diff laat de beoordelaar alles goedkeuren zonder iets te zien."""
+        runner = self.build()
+        task_id = self.task(runner)
+        self._leg_werk_klaar(runner, task_id, bestand="zichtbaar.py",
+                             inhoud="def f():\n    return 1\n")
+        runner.run_task(task_id)
+
+        contexten = [
+            json.loads(r["payload"]) for r in self.scope.events(limit=50)
+            if r["kind"] == "reviewer-context"
+        ]
+        beoordeling = [c for c in contexten if c.get("fase") == "beoordelen"]
+        self.assertTrue(beoordeling, "de beoordelaar is niet aangeroepen")
+        self.assertGreater(
+            beoordeling[0]["diff_tekens"], 0,
+            "de beoordelaar kreeg een lege diff terwijl er werk vastligt",
+        )
