@@ -155,6 +155,30 @@ class VerificationResult:
     def failed(self) -> list[CheckResult]:
         return [c for c in self.checks if not c.ok]
 
+    def rode_namen(self) -> set[str]:
+        return {c.name for c in self.failed}
+
+    def regressies(self, baseline: "VerificationResult | None") -> list[CheckResult]:
+        """Checks die op de baseline groen stonden en nu falen.
+
+        Dit is het onderscheid dat telt. Een check die op main al rood stond, is
+        niet door deze wijziging gebroken -- en als de taak juist bedoeld is om
+        hem te repareren, mag hij de uitvoering niet tegenhouden. Maar iets dat
+        eerst groen was en nu faalt, is wél door deze wijziging veroorzaakt en
+        mag nooit wegvallen onder "bestond al".
+        """
+        if baseline is None:
+            return list(self.failed)
+        al_rood = baseline.rode_namen()
+        return [c for c in self.failed if c.name not in al_rood]
+
+    def blijft_rood(self, baseline: "VerificationResult | None") -> list[CheckResult]:
+        """Checks die zowel voor als na de wijziging falen."""
+        if baseline is None:
+            return []
+        al_rood = baseline.rode_namen()
+        return [c for c in self.failed if c.name in al_rood]
+
     def signature(self) -> str:
         """Handtekening van het falen, voor de geen-vooruitgang-detector."""
         parts = []

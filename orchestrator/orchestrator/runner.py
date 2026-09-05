@@ -46,6 +46,26 @@ class RunOutcome:
             self.questions = []
 
 
+def _kolom(rij, naam: str):
+    """Leest een kolom die in een oudere database nog kan ontbreken."""
+    try:
+        return rij[naam]
+    except (IndexError, KeyError):
+        return None
+
+
+def review_handtekening(diff: str, context: str, summary: str,
+                        acceptance: list[str]) -> str:
+    """Alles wat het oordeel van de beoordelaar materieel bepaalt.
+
+    Zijn deze vier gelijk aan de vorige keer, dan is het oordeel dat ook. Nog
+    een keer betalen levert dan niets op; dan is er geen nieuwe toestand en
+    hoort de taak te stoppen in plaats van rond te draaien.
+    """
+    ruw = f"{diff}\n{context}\n{summary}\n{sorted(acceptance)}"
+    return "review:" + hashlib.sha256(ruw.encode()).hexdigest()
+
+
 def _schatting(prompt: str, uitvoerfactor: float = 0.25) -> tuple[int, int]:
     """Ruwe tokenschatting uit de werkelijke prompt.
 
@@ -279,27 +299,22 @@ class Runner:
 
         run_id = self.scope.start_run(task_id, "task")
         self._auto_answers = []
-        # Over runs heen bewaard in de database; binnen een run hier, zodat een
-        # herhaalde herziening ook zichtbaar is nadat de feedback verwerkt is.
-        self._verwerkte_feedback = None
 
         # 0 · baseline
         self.scope.set_task(task_id, status=TaskStatus.BASELINE.value)
         baseline = self.verifier.run(self.project.repo_root, self.project.checks)
         if self.project.checks and not baseline.ok:
-            self.scope.set_task(task_id, status=TaskStatus.BLOCKED.value)
-            self.scope.end_run(run_id, "baseline_rood")
-            detail = "de repository staat al rood vóór er iets gewijzigd is: " + ", ".join(
-                c.name for c in baseline.failed
+            # Rood op main houdt de taak niet meer tegen. Vaak is dat juist wat
+            # er gerepareerd moet worden, en dan zou blokkeren betekenen dat de
+            # reparatie nooit kan draaien. De uitslag wordt wel bewaard: alles
+            # wat hierna faalt en hier groen stond, is door de wijziging
+            # veroorzaakt en wordt nooit weggewuifd als "bestond al".
+            self._log(
+                "baseline-rood", task_id=task_id,
+                al_rood=sorted(baseline.rode_namen()),
+                detail="stond al rood vóór deze wijziging; de taak mag door, maar"
+                       " een nieuwe regressie wordt hierna wel geblokkeerd",
             )
-            self._log("baseline-rood", task_id=task_id, detail=detail)
-            self.notifier.send(Message(
-                subject="Baseline staat rood",
-                body=detail + "\n\nEerst dit oplossen; anders is niet vast te stellen"
-                     " of een wijziging iets breekt.",
-                project=self.project.slug, urgent=True, labels=["orch:block"],
-            ))
-            return RunOutcome(TaskStatus.BLOCKED, detail)
 
         worktree = None
         try:
@@ -363,11 +378,14 @@ class Runner:
                 # later opnieuw als openstaand punt presenteren.
                 verwerkt = task["review_feedback"] if "review_feedback" in task.keys() else None
                 if verwerkt:
-                    # Onthouden waartegen we straks vergelijken: krijgt de
-                    # beoordelaar hierna exact dezelfde herziening terug, dan
-                    # heeft deze ronde niets opgeleverd.
-                    self._verwerkte_feedback = verwerkt
-                    self.scope.set_task(task_id, review_feedback=None)
+                    # Het openstaande punt is verwerkt en gaat weg, maar wát er
+                    # verwerkt is blijft staan. Anders is na een herstart niet
+                    # meer te zien dat de beoordelaar exact hetzelfde vraagt, en
+                    # draait de taak alsnog in een kring. In het geheugen bewaren
+                    # volstaat niet: een herstart is juist het geval waar het om
+                    # gaat.
+                    self.scope.set_task(task_id, review_feedback=None,
+                                        last_review_feedback=verwerkt)
                     task = self.scope.task(task_id)
                 self._log(
                     "uitvoering", task_id=task_id,
@@ -405,12 +423,22 @@ class Runner:
                     gefaald=[c.name for c in verification.failed],
                     poging=(task["iterations"] or 0) + 1,
                 )
-                if self.project.checks and not verification.ok:
+                regressies = verification.regressies(baseline)
+                blijft_rood = verification.blijft_rood(baseline)
+                if blijft_rood:
+                    self._log(
+                        "nog-steeds-rood", task_id=task_id,
+                        checks=[c.name for c in blijft_rood],
+                        detail="stond op de baseline ook al rood; niet door deze"
+                               " wijziging veroorzaakt",
+                    )
+                if self.project.checks and regressies:
                     signature = verification.signature()
                     if self.no_progress.stuck(signature) or self.scope.seen_signature(
                         task_id, signature
                     ):
-                        detail = "tweemaal dezelfde falende uitslag; niet nog een poging"
+                        detail = ("tweemaal dezelfde falende uitslag; niet nog een poging."
+                                  " Gefaald: " + ", ".join(c.name for c in regressies))
                         self.scope.set_task(task_id, status=TaskStatus.BLOCKED.value)
                         self._log("geen-vooruitgang", task_id=task_id, signature=signature)
                         self.notifier.send(Message(
@@ -639,7 +667,7 @@ class Runner:
         # per definitie niet -- ongeacht hoe groen de verificatie staat. Zonder
         # deze uitzondering gaat een hervatte taak rechtstreeks naar de
         # beoordelaar, krijgt dezelfde herziening terug, en draait in een kring.
-        if task["review_feedback"] if "review_feedback" in task.keys() else None:
+        if _kolom(task, "review_feedback"):
             self._log("hervatting-overgeslagen", task_id=task_id,
                       detail="er ligt reviewerfeedback die nog verwerkt moet worden")
             return None
@@ -703,12 +731,35 @@ class Runner:
 
         review: ReviewResult | None = None
         if self.reviewer is not None and self.project.reviewer_enabled:
-            self._preflight(self.settings.reviewer_model, task_id, run_id, 25000, 4000)
             diff = redact_diff(
                 worktree.full_diff(self.project.default_branch),
                 self.project.redact_patterns,
             )
             context = redact_text(self._knowledge_context(), self.project.redact_patterns)
+
+            # Dezelfde diff, dezelfde kennis en dezelfde uitslag leveren hetzelfde
+            # oordeel op. Nog een keer betalen brengt niets: dan is er geen nieuwe
+            # toestand en hoort de taak te stoppen in plaats van rond te draaien.
+            handtekening = review_handtekening(diff, context, summary, acceptance)
+            if _kolom(task, "last_review_signature") == handtekening:
+                detail = (
+                    "de beoordelaar heeft deze exacte diff bij deze kennis en deze"
+                    " verificatie-uitslag al beoordeeld. Er is niets veranderd, dus"
+                    " nog een beoordeling levert hetzelfde op."
+                )
+                self.scope.set_task(task_id, status=TaskStatus.BLOCKED.value)
+                self._log("herhaalde-beoordeling", task_id=task_id, detail=detail)
+                self.notifier.send(Message(
+                    subject=f"Vastgelopen zonder nieuwe toestand: {task['title'][:50]}",
+                    body=detail, project=self.project.slug, urgent=True,
+                    labels=["orch:block"],
+                ))
+                self.scope.end_run(run_id, "herhaalde_beoordeling")
+                return RunOutcome(TaskStatus.BLOCKED, detail)
+            self.scope.set_task(task_id, last_review_signature=handtekening)
+
+            self._preflight(self.settings.reviewer_model, task_id, run_id,
+                            *_schatting(diff + context))
             self._log_context(task_id, "beoordelen", context, {
                 "diff_tekens": len(diff),
                 "verificatie_samenvatting": summary,
@@ -775,8 +826,7 @@ class Runner:
                 ],
                 "criteria_open": review.acceptance_missing,
             }, ensure_ascii=False)
-            vorige = (task["review_feedback"] if "review_feedback" in task.keys() else None) \
-                or getattr(self, "_verwerkte_feedback", None)
+            vorige = _kolom(task, "review_feedback") or _kolom(task, "last_review_feedback")
             if vorige == nieuwe_feedback:
                 detail = (
                     "de beoordelaar vraagt exact dezelfde herziening als de vorige"
@@ -895,7 +945,7 @@ class Runner:
                 + ", ".join(c.raw for c in q.citations)
                 for q in answered
             ))
-        feedback = task["review_feedback"] if "review_feedback" in task.keys() else None
+        feedback = _kolom(task, "review_feedback")
         if feedback:
             gegevens = json.loads(feedback)
             regels = [

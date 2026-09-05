@@ -254,23 +254,45 @@ class KnowledgeStore:
         return item_id
 
     def supersede(self, item_id: str, replaced_by: str) -> None:
-        """Markeert een item als vervallen. Alleen na een bevestigd nieuw besluit."""
+        """Markeert een item als vervallen. Alleen na een bevestigd nieuw besluit.
+
+        De tekst van het item blijft staan: de historie is juist waarom je dit
+        wilt vastleggen in plaats van overschrijven.
+        """
         item = self.get(item_id)
         if item is None:
             raise KnowledgeError(f"onbekend item {item_id!r}")
         path = self.root / item.file
         text = path.read_text(encoding="utf-8")
-        pattern = re.compile(
-            rf"(^##\s+{re.escape(item_id)}\b.*?$\n)(status:\s*.*$)", re.M | re.S
+
+        # Alleen de statusregel van DIT item vervangen. Een eerdere versie
+        # gebruikte re.S, waardoor '.' ook nieuwe regels ving en de rest van het
+        # bestand werd opgeslokt -- inclusief alle items eronder.
+        patroon = re.compile(
+            rf"(?P<kop>^##[ \t]+{re.escape(item_id)}\b[^\n]*\n)"
+            rf"(?P<status>[ \t]*status[ \t]*:[^\n]*\n)"
+            rf"(?P<vervangt>[ \t]*vervangt[ \t]*:[^\n]*\n)?",
+            re.M | re.I,
         )
-        new_text, count = pattern.subn(
-            lambda m: m.group(1) + f"status: {ItemStatus.SUPERSEDED.value}", text, count=1
-        )
-        if count:
-            new_text = new_text.replace(
-                f"status: {ItemStatus.SUPERSEDED.value}",
-                f"status: {ItemStatus.SUPERSEDED.value}\nvervangt: {replaced_by}",
-                1,
+
+        def vervang(m: re.Match) -> str:
+            return (
+                m.group("kop")
+                + f"status: {ItemStatus.SUPERSEDED.value}\n"
+                + f"vervangt: {replaced_by}\n"
             )
-            path.write_text(new_text, encoding="utf-8")
+
+        nieuwe_tekst, aantal = patroon.subn(vervang, text, count=1)
+        if not aantal:
+            raise KnowledgeError(
+                f"kon de statusregel van {item_id!r} niet vinden in {item.file}"
+            )
+        if len(nieuwe_tekst) < len(text) * 0.9:
+            # Zekerheid boven elegantie: verliest deze bewerking meer dan een
+            # tiende van het bestand, dan klopt er iets niet en schrijven we niet.
+            raise KnowledgeError(
+                f"supersede van {item_id!r} zou het grootste deel van {item.file}"
+                " wissen; niet uitgevoerd"
+            )
+        path.write_text(nieuwe_tekst, encoding="utf-8")
         self._cache = {}

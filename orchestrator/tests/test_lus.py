@@ -143,12 +143,48 @@ class Lus(TempCase):
         self.assertEqual(outcome.status, TaskStatus.BLOCKED)
         self.assertIn("dezelfde falende uitslag", outcome.detail)
 
-    def test_rode_baseline_wordt_niet_aan_de_uitvoerder_toegeschreven(self):
-        runner = self.build(checks={"tests": PAS_GROEN_MET_BESTAND}, steps=[{}])
+    def test_rode_baseline_houdt_de_reparatie_niet_tegen(self):
+        """Vaak is die rode check juist wat de taak moet repareren.
+
+        Blokkeren zou dan betekenen dat de reparatie nooit kan draaien. De
+        uitslag wordt wel bewaard, zodat alles wat hierna faalt en op de
+        baseline groen stond wél als regressie geldt.
+        """
+        runner = self.build(
+            checks={"tests": PAS_GROEN_MET_BESTAND},
+            steps=[{"write": {"klaar.txt": "gerepareerd\n"}}],
+        )
         outcome = runner.run_task(self.scope.add_task("A", acceptance=["werkt"]))
-        self.assertEqual(outcome.status, TaskStatus.BLOCKED)
-        self.assertIn("al rood", outcome.detail)
-        self.assertEqual(self.executor.calls, [], "de uitvoerder mag niet gedraaid hebben")
+
+        self.assertEqual(len(self.executor.calls), 1,
+                         "de uitvoerder is niet gedraaid terwijl hij moest repareren")
+        self.assertEqual(outcome.status, TaskStatus.PR_OPEN)
+        events = [r for r in self.scope.events(limit=50) if r["kind"] == "baseline-rood"]
+        self.assertTrue(events, "de rode baseline is niet vastgelegd")
+        self.assertIn("tests", json.loads(events[0]["payload"])["al_rood"])
+
+    def test_nieuwe_regressie_wordt_nooit_weggewuifd(self):
+        """Groen op de baseline en daarna rood: dat is door de wijziging."""
+        runner = self.build(
+            checks={"tests": ROOD_BIJ_BESTAND},
+            steps=[{"write": {"stuk.txt": "kapot\n"}},
+                   {"write": {"stuk.txt": "nog steeds kapot\n"}}],
+        )
+        outcome = runner.run_task(self.scope.add_task("A", acceptance=["werkt"]))
+
+        self.assertNotEqual(outcome.status, TaskStatus.PR_OPEN,
+                            "een regressie leverde toch een PR op")
+
+    def test_al_rode_check_die_rood_blijft_wordt_gemeld(self):
+        runner = self.build(
+            checks={"tests": PAS_GROEN_MET_BESTAND},
+            steps=[{"write": {"iets_anders.txt": "niet de reparatie\n"}}],
+        )
+        runner.run_task(self.scope.add_task("A", acceptance=["werkt"]))
+
+        events = [r for r in self.scope.events(limit=50) if r["kind"] == "nog-steeds-rood"]
+        self.assertTrue(events, "een check die rood blijft is nergens gemeld")
+        self.assertIn("tests", json.loads(events[0]["payload"])["checks"])
 
     # -- beoordelaar -------------------------------------------------------
     def test_pass_met_openstaand_criterium_wordt_geen_commit(self):

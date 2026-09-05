@@ -39,6 +39,8 @@ CREATE TABLE IF NOT EXISTS tasks (
     iterations    INTEGER NOT NULL DEFAULT 0,
     review_rounds INTEGER NOT NULL DEFAULT 0,
     review_feedback TEXT,
+    last_review_feedback TEXT,
+    last_review_signature TEXT,
     cost_eur      REAL NOT NULL DEFAULT 0,
     created_at    TEXT NOT NULL,
     updated_at    TEXT NOT NULL
@@ -215,6 +217,9 @@ class Database:
         kolommen = {r["name"] for r in self.conn.execute("PRAGMA table_info(calls)")}
         if "wasted_reason" not in kolommen:
             self.conn.execute("ALTER TABLE calls ADD COLUMN wasted_reason TEXT")
+        for kolom in ("last_review_feedback", "last_review_signature"):
+            if kolom not in bestaand:
+                self.conn.execute(f"ALTER TABLE tasks ADD COLUMN {kolom} TEXT")
 
     def close(self) -> None:
         self.conn.close()
@@ -335,6 +340,7 @@ class ProjectScope:
             "status", "spec", "acceptance", "priority", "depends_on",
             "blocked_by_question", "claude_session_id", "reviewer_response_id",
             "iterations", "review_rounds", "cost_eur", "review_feedback",
+            "last_review_feedback", "last_review_signature",
         }
         unknown = set(fields) - allowed
         if unknown:
