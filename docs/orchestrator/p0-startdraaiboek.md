@@ -453,3 +453,33 @@ bepaalde of er $0,30 uitging.
 Een verse worktree heeft geen `node_modules`. Hoe een worktree aan zijn
 afhankelijkheden komt — `npm ci` per worktree, of delen met de hoofdmap — is
 een ontwerpkeuze met gevolgen voor snelheid en isolatie, en staat geparkeerd.
+
+---
+
+## Deel H — de revise-ronde, en waarom B7 nu wél rond is
+
+| # | defect | gevolg | status |
+|---|---|---|---|
+| D-11 | `npm run build` schrijft `next-env.d.ts` in de worktree | de wijziging belandde in de beoordeelde en vastgelegde diff | hersteld: de runner noteert wat er vóór de verificatie openstond en zet daarna alleen terug wat erbij kwam |
+| D-12 | bij verdict `revise` ging `next_instruction` naar het scherm en nergens anders | de uitvoerder zou dezelfde prompt krijgen, hetzelfde werk maken en hetzelfde oordeel terugkrijgen: betaalde rondjes zonder vooruitgang | hersteld: bevindingen worden op de taak bewaard en komen als eigen blok in de prompt, aangekondigd als gerichte correctie |
+| — | een bruikbare worktree werd gewist bij hergebruik, inclusief de geïnstalleerde afhankelijkheden | dit veroorzaakte D-10: verificatie kon niet draaien | hersteld: staat de worktree op de juiste branch, dan blijft hij staan; gevolgde bestanden worden wel teruggezet |
+
+**D-12 is gevonden vóór er een betaalde aanroep uitging**, door de code te lezen
+in plaats van te draaien. Dat is de goedkoopste manier om een defect te vinden.
+
+### Wat de revise-ronde kostte: $0,031098
+
+Nul aanroepen naar de uitvoerder. De twee punten van de beoordelaar werden zo
+opgelost:
+
+1. *De ongerelateerde wijziging in `next-env.d.ts`* — deterministisch, door de
+   D-11-fix. Geen model nodig.
+2. *Versmal de tests tot de acceptatiecriteria* — **niet uitgevoerd.** Bij de
+   herbeoordeling van de opgeschoonde diff woog de beoordelaar dit punt zelf af
+   naar `minor` met de aanbeveling "optioneel versmallen in een
+   vervolgwijziging; geen blokkade", en gaf `pass`.
+
+Dat verdient een eerlijke kanttekening: het tweede punt is dus niet opgelost
+maar heroverwogen. Of de beoordelaar daarmee te soepel is, is een echte vraag.
+Wat wel vaststaat: het verwijderen van de ongerelateerde wijziging was genoeg om
+het oordeel te laten kantelen, en dat is precies wat D-11 blootlegde.
