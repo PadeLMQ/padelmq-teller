@@ -139,6 +139,18 @@ def _alternative(raw: dict) -> Alternative:
     )
 
 
+
+def _cached_tokens(usage) -> int:
+    """Cachetokens uit input_tokens_details.
+
+    De Responses-API zet ze in een subobject; ontbreekt dat, dan is er niets
+    uit de cache gekomen en is 0 het juiste antwoord, geen aanname.
+    """
+    details = getattr(usage, "input_tokens_details", None)
+    if details is None:
+        return 0
+    return int(getattr(details, "cached_tokens", 0) or 0)
+
 class OpenAIReviewer:
     def __init__(self, model: str, client: Any | None = None):
         self.model = model
@@ -185,6 +197,7 @@ class OpenAIReviewer:
                 model=self.model,
                 tokens_in=int(getattr(usage, "input_tokens", 0) or 0),
                 tokens_out=int(getattr(usage, "output_tokens", 0) or 0),
+                cached_in=_cached_tokens(usage),
             ),
         )
 

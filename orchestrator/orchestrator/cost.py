@@ -25,16 +25,45 @@ class BudgetExceeded(RuntimeError):
         )
 
 
+class InconsistentUsage(RuntimeError):
+    """De provider rapporteert meer cachetokens dan invoertokens.
+
+    Dat spreekt het datamodel van de provider tegen (cached_tokens is een
+    onderdeel van input_tokens). We rekenen dan niet door met een gegokt
+    bedrag maar stoppen, zoals bij elke andere afwijking.
+    """
+
+
 @dataclass
 class Estimate:
+    """Tokens van één aanroep.
+
+    tokens_in is het TOTAAL aan invoertokens; cached_in is daar een deel van,
+    niet iets bovenop. Zo rapporteert de Responses-API het ook:
+    input_tokens_details is "a detailed breakdown of the input tokens".
+    Het deel dat uit de cache kwam gaat tegen het cachetarief, de rest tegen
+    het gewone invoertarief. Cacheschrijfacties hebben geen apart tarief en
+    blijven dus gewoon invoer.
+    """
+
     model: str
     tokens_in: int
     tokens_out: int
     cached_in: int = 0
 
+    @property
+    def uncached_in(self) -> int:
+        if self.cached_in > self.tokens_in:
+            raise InconsistentUsage(
+                f"model {self.model}: {self.cached_in} cachetokens op "
+                f"{self.tokens_in} invoertokens; cached_in hoort een deel van "
+                "tokens_in te zijn"
+            )
+        return self.tokens_in - self.cached_in
+
     def cost(self, price: ModelPrice) -> float:
         return (
-            self.tokens_in / 1_000_000 * price.input_per_mtok
+            self.uncached_in / 1_000_000 * price.input_per_mtok
             + self.tokens_out / 1_000_000 * price.output_per_mtok
             + self.cached_in / 1_000_000 * price.cached_input_per_mtok
         )
