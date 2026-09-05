@@ -106,6 +106,12 @@ class ClaudeExecutor:
             "--permission-prompts", "none",
             "--allowedTools", self.allowed_tools,
             "--append-system-prompt", SYSTEM_ADDITION,
+            # Geen MCP-servers uit de omgeving. Zonder deze vlag erft het
+            # subproces alle toolbeschrijvingen van de sessie waarin de
+            # orkestrator draait. In de pilot was dat het grootste deel van
+            # 893.763 invoertokens bij een prompt van nog geen 2.000: de
+            # uitvoerder betaalde vooral voor gereedschap dat hij niet gebruikt.
+            "--strict-mcp-config",
         ]
         # Bewust GEEN --resume. Het teruggekregen sessie-id is dat van de sessie
         # waarin de orkestrator zelf draait, niet van een eigen gesprek per taak.

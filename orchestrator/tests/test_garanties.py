@@ -394,3 +394,25 @@ class G13_BudgetberichtInDeJuisteValuta(unittest.TestCase):
         fout = BudgetExceeded("taak 1", 2.0, 1.91, 0.06, "$")
         self.assertIn("$1.9100", str(fout))
         self.assertNotIn("€", str(fout))
+
+
+class G14_UitvoerderErftGeenVreemdGereedschap(unittest.TestCase):
+    """Het subproces erfde alle MCP-toolbeschrijvingen van de sessie.
+
+    Bij een prompt van nog geen 2.000 tokens werden er 893.763 in rekening
+    gebracht. De uitvoerder betaalde vooral voor gereedschap dat hij niet
+    gebruikt.
+    """
+
+    def test_mcp_servers_worden_genegeerd(self):
+        from orchestrator.adapters.claude import ClaudeExecutor
+
+        cmd = ClaudeExecutor("claude-opus-5")._command("doe iets", None)
+        self.assertIn("--strict-mcp-config", cmd)
+        self.assertNotIn("--mcp-config", cmd)
+
+    def test_het_gereedschap_blijft_beperkt(self):
+        from orchestrator.adapters.claude import ClaudeExecutor
+
+        cmd = ClaudeExecutor("claude-opus-5")._command("doe iets", None)
+        self.assertIn("--allowedTools", cmd)
