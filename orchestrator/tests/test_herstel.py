@@ -278,3 +278,52 @@ class GeblokkeerdDoorNiets(TempCase):
 
         self.assertNotIn(tid, recover(scope, self.settings).hervatte_taken)
         self.assertEqual(scope.task(tid)["status"], TaskStatus.BLOCKED.value)
+
+
+class OpgegevenNaBudget(TempCase):
+    """Een taak die het herstel opgaf ná een budgetstop moet toch terugkomen.
+
+    Taak 3 van padelmq-ai-product-engine raakte zo definitief kwijt: het herstel
+    bood haar drie keer aan, ze viel drie keer op dezelfde budgetmuur, en de
+    laatste gebeurtenis werd 'herstel-opgegeven'. De budgetstop eronder was
+    daarmee niet meer zichtbaar, dus ook een verhoging hielp niet meer.
+    """
+
+    def _scope(self):
+        self.db.ensure_project("p")
+        return self.db.scope("p")
+
+    def test_de_budgetstop_onder_het_opgeven_telt_nog(self):
+        from orchestrator.models import TaskStatus
+        from orchestrator.recovery import recover
+
+        scope = self._scope()
+        tid = scope.add_task("gestrand en opgegeven", acceptance=["werkt"])
+        scope.set_task(tid, status=TaskStatus.FAILED.value)
+        scope.log("budget", {"niveau": "taak 3", "grens": 2.0, "dag": "2026-09-06"},
+                  task_id=tid)
+        scope.log("hersteld", {"van": "failed"}, task_id=tid)
+        scope.log("herstel-opgegeven", {"pogingen": 3}, task_id=tid)
+
+        self.settings.budget_task_eur = 5.0
+        uitkomst = recover(scope, self.settings, vandaag="2026-09-06")
+        self.assertIn(tid, uitkomst.hervatte_taken)
+
+    def test_echt_werk_na_de_budgetstop_maakt_er_geen_budgetzaak_meer_van(self):
+        """Is er ná de stop iets inhoudelijks gebeurd, dan wacht de taak niet
+        meer op geld en gelden de gewone herstelregels."""
+        from orchestrator.models import TaskStatus
+        from orchestrator.recovery import recover
+
+        scope = self._scope()
+        tid = scope.add_task("verder gegaan", acceptance=["werkt"])
+        scope.set_task(tid, status=TaskStatus.FAILED.value)
+        scope.log("budget", {"niveau": "taak 4", "grens": 2.0, "dag": "2026-09-06"},
+                  task_id=tid)
+        scope.log("uitvoering", {"samenvatting": "er is daarna echt gewerkt"}, task_id=tid)
+
+        self.settings.budget_task_eur = 5.0
+        uitkomst = recover(scope, self.settings, vandaag="2026-09-06")
+        soorten = [e["kind"] for e in scope.events(limit=50)]
+        self.assertNotIn("budget-hervat", soorten)
+        self.assertIn(tid, uitkomst.hervatte_taken)   # via de gewone herstelweg

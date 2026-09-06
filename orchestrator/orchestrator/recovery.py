@@ -98,17 +98,26 @@ def _laatste_budgetstop(scope, task_id: int):
     Alleen de meest recente telt: is er daarna iets anders gebeurd, dan staat de
     taak niet meer op het budget te wachten.
     """
-    rij = scope.conn.execute(
+    # Gebeurtenissen van het herstel zelf zeggen niets over de taak: ze zijn het
+    # gevolg van de budgetstop, niet iets wat daarna is gebeurd. Taak 3 raakte
+    # hierdoor definitief kwijt -- de laatste gebeurtenis was
+    # 'herstel-opgegeven', dus de budgetstop eronder werd niet meer gezien.
+    DOORKIJKEN = ("herstel-opgegeven", "hersteld", "budget-hervat",
+                  "blokkade-zonder-vraag", "run-verweesd")
+    for rij in scope.conn.execute(
         "SELECT kind, payload FROM events WHERE project_id = ? AND task_id = ?"
-        " ORDER BY id DESC LIMIT 1",
+        " ORDER BY id DESC LIMIT 12",
         (scope.project_id, task_id),
-    ).fetchone()
-    if rij is None or rij["kind"] != "budget":
-        return None
-    try:
-        return json.loads(rij["payload"] or "{}")
-    except (TypeError, ValueError):
-        return {}
+    ).fetchall():
+        if rij["kind"] in DOORKIJKEN:
+            continue
+        if rij["kind"] != "budget":
+            return None
+        try:
+            return json.loads(rij["payload"] or "{}")
+        except (TypeError, ValueError):
+            return {}
+    return None
 
 
 def budget_ruimer_dan(gegevens: dict, settings, vandaag: str) -> bool:
