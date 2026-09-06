@@ -719,13 +719,24 @@ class Runner:
             task["acceptance"] or "",
         ])
         for finding in detect_invented_values(diff, known):
+            # De regel waar de waarde in staat is context, geen keuze. Hij stond
+            # hier als enige optie, en daarmee was het enige beantwoordbare
+            # antwoord "ja, die waarde hoort daar" -- precies wat deze poort moet
+            # tegenhouden. Taak #3 liep daar vast: er was geen manier om te
+            # zeggen dat de waarde verzonnen was.
             question = Question(
                 text=(
                     f"Waar komt de waarde {finding.value} vandaan in "
-                    f"{finding.file}:{finding.line_no} ({finding.reason})?"
+                    f"{finding.file}:{finding.line_no} ({finding.reason})?\n\n"
+                    f"De regel luidt: `{finding.line.strip()[:200]}`"
                 ),
                 why_blocking="nieuwe harde waarde die nergens op terug te voeren is",
-                options=[finding.line],
+                options=[
+                    "De waarde is verzonnen; haal haar weg of vervang haar door"
+                    " een waarde die uit de opdracht of de kennisbasis komt.",
+                    "De waarde klopt en komt uit een bron die ik hierbij noem;"
+                    " leg die bron vast.",
+                ],
                 category="geld" if finding.reason in ("bedrag", "percentage") else "waarde",
                 task_id=task_id,
             )

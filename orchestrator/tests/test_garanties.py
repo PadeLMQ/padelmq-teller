@@ -469,3 +469,34 @@ class VastloperHeeftEenWegTerug(TempCase):
                       "de vastloper legt geen vraag vast en is dus niet te beantwoorden")
         self.assertIn("options=[", blok,
                       "zonder opties moet de eigenaar zelf bedenken wat de keuzes zijn")
+
+
+class VerzonnenWaardeIsTeWeigeren(TempCase):
+    """De poort tegen verzonnen waarden moet ook 'verzonnen' als antwoord kennen.
+
+    Taak #3 van padelmq-ai-product-engine liep hierop vast. De vraag bood als
+    enige optie de broncode-regel waar de verzonnen waarde in stond. Het enige
+    beantwoordbare antwoord was daarmee "ja, die waarde hoort daar" -- precies
+    wat deze poort hoort tegen te houden. Vier antwoorden lang bleef hij hangen.
+    """
+
+    def test_de_opties_bevatten_een_weigering(self):
+        import inspect
+
+        from orchestrator.runner import Runner
+
+        bron = inspect.getsource(Runner._guard_phase)
+        blok = bron[bron.index("detect_invented_values"):]
+        self.assertIn("verzonnen", blok,
+                      "er is geen optie waarmee je kunt zeggen dat de waarde verzonnen is")
+        self.assertNotIn("options=[finding.line]", blok,
+                         "de broncode-regel staat nog als enige keuze aangeboden")
+
+    def test_de_regel_staat_als_context_in_de_vraag(self):
+        import inspect
+
+        from orchestrator.runner import Runner
+
+        bron = inspect.getsource(Runner._guard_phase)
+        self.assertIn("De regel luidt:", bron,
+                      "zonder de regel erbij is de vraag niet te beoordelen")
