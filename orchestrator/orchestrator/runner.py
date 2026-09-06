@@ -21,6 +21,7 @@ from .db import ProjectScope
 from .git import GitAdapter, GitError, run_git
 from .guards import NoProgressDetector, detect_invented_values
 from .models import (
+    now as _now,
     Question, TaskStatus, Triage, TriageResult, VerificationResult, Verdict,
 )
 from .notify import Message, Notifier
@@ -218,6 +219,14 @@ class Runner:
             "## Wat ondertussen wel doorgaat",
             ("\n".join(f"- {t['title']}" for t in others)
              or "_niets; dit project wacht volledig op deze beslissing_"),
+            "",
+            # De kosten horen hier, niet alleen in een database op een volume.
+            # Wie moet beslissen of dit werk verder mag, hoort te zien wat het
+            # tot nu toe heeft gekost -- zonder ergens te moeten inloggen.
+            "## Kosten van deze taak tot nu toe",
+            f"{self.settings.symbol}{self.scope.spend_task(task_id):.6f}"
+            f" (dagtotaal voor dit project:"
+            f" {self.settings.symbol}{self.scope.spend_today(_now()[:10]):.6f})",
             "",
             "---",
             "**Antwoord gewoon in dit issue.** Je mag een optienummer noemen, een optie "

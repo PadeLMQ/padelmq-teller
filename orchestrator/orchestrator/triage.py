@@ -32,9 +32,30 @@ _FORBIDDEN_HINTS = re.compile(
     r"\b(btw|vat|belasting|fiscaal|prijs|prijzen|tarief|korting|marge|bedrag|"
     r"euro|factuur|contract|juridisch|aansprakelijk|persoonsgegeven|klantgegeven|"
     r"gdpr|avg|bewaartermijn|wachtwoord|token|secret|toegangsrecht|migratie|"
-    r"datamodel|schema)\b",
+    r"datamodel|schema|"
+    # Handelingen die de winkel raken. Eén treffer is genoeg: dit zijn geen
+    # woorden die per ongeluk in een vraag over documentatie terechtkomen.
+    r"shopify|publiceren|publicatie|productcreate|voorraad|deploy|deployen|"
+    r"uitrollen|(?:ge)?merge\w*)\b",
     re.I,
 )
+
+# Woorden die niets zeggen over het onderwerp van een vraag. Zonder deze lijst
+# vuurt de overlaptoets hieronder op gewone taal: een vraag werd geweigerd op
+# de woorden 'echte' en 'komen', terwijl de enige vraag die werkelijk over
+# Shopify ging er ongemoeid doorheen kwam. Een poort die op willekeur afgaat
+# is geen poort.
+_ALLEDAAGS = frozenset("""
+aangepast alleen alles ander andere bestaan bestaand bestaande betekent
+bijvoorbeeld binnen blijft blijven daarna daarom dezelfde direct doordat
+echter echte eerst enkel gebeurt gebruik gebruiken geven gewoon graag hebben
+heeft hierbij hoeft hoort houden iedere ieder inclusief komen komt krijgen
+krijgt kunnen laten maken meer moeten mogen nodig nooit omdat onder ongeacht
+opnieuw precies staan staat steeds terug tussen vanaf verder volgende voorbij
+waarbij waarde waarden wanneer weten wijzigen wijziging worden wordt zonder
+zoals zouden claude database project projecten taak taken bestand bestanden
+documentatie regel regels commando commando's script scripts
+""".split())
 
 
 @dataclass
@@ -101,9 +122,17 @@ class TriageEngine:
             )
         haystack = question.text.lower()
         for forbidden in self.ctx.knowledge.forbidden_topics():
-            words = [w for w in re.split(r"\W+", forbidden) if len(w) > 4]
-            if words and sum(1 for w in words if w in haystack) >= 2:
-                return "de vraag raakt een regel uit verboden.md van dit project"
+            woorden = {
+                w for w in re.split(r"\W+", forbidden)
+                if len(w) > 4 and w not in _ALLEDAAGS
+            }
+            raak = sorted(w for w in woorden if w in haystack)
+            if len(raak) >= 2:
+                # Het bewijs hoort in de melding. Zonder de woorden erbij is een
+                # onterechte weigering niet van een terechte te onderscheiden,
+                # en zou niemand merken dat de poort op onzin afgaat.
+                return ("de vraag raakt een regel uit verboden.md van dit project"
+                        f" (op de woorden {', '.join(repr(w) for w in raak[:5])})")
         return None
 
     # -- de beslissing ----------------------------------------------------

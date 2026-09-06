@@ -143,3 +143,78 @@ class Triageregels(TempCase):
             citations=[Citation(f"kb:{self.confirmed}")],
         )
         self.assertEqual(self.engine().decide(question).outcome, Triage.PARK)
+
+
+class PoortOpGewoneTaal(TempCase):
+    """De verboden-poort ging op willekeur af.
+
+    Drie echte vragen op issue #2 van padelmq-ai-product-engine werden
+    geweigerd met "raakt een regel uit verboden.md". De woorden waarop dat
+    gebeurde waren 'echte', 'komen', 'claude', 'database' en 'krijgen'. De
+    enige vraag die werkelijk over Shopify ging kwam er ongemoeid doorheen.
+
+    Een poort die zo werkt is geen poort: hij weigert onschuldige vragen en
+    laat de gevaarlijke door.
+    """
+
+    def _motor(self, verboden_tekst: str):
+        from orchestrator.knowledge import KnowledgeStore
+        from orchestrator.triage import TriageContext, TriageEngine
+
+        kennis = self.tmp / "kennis"
+        KnowledgeStore(kennis).scaffold("p")
+        (kennis / "verboden.md").write_text(
+            "# p — verboden\n\n## VB-1 · Geen live acties\n"
+            "status: bevestigd\ndatum: 2026-09-06\nbron: eigenaar\n\n"
+            + verboden_tekst + "\n", encoding="utf-8")
+        return TriageEngine(TriageContext(knowledge=KnowledgeStore(kennis),
+                                          repo_root=self.tmp))
+
+    def _vraag(self, tekst: str):
+        from orchestrator.models import Question
+        return Question(text=tekst)
+
+    LANG = ("Zonder uitdrukkelijke toestemming van de eigenaar mag er niets echte "
+            "gebeuren: geen live write, geen deploy naar productie. Wat er niet in "
+            "staat mag niet komen. De documentatie in CLAUDE.md en de database "
+            "blijven ongemoeid; niemand mag rechten krijgen die er niet zijn.")
+
+    def test_gewone_taal_leidt_niet_meer_tot_een_weigering(self):
+        motor = self._motor(self.LANG)
+        for vraag in [
+            "Moeten README.md:13 en DATABASE.md:303 dezelfde Node-verduidelijking "
+            "krijgen als CLAUDE.md?",
+            "Wat is de echte ondergrens voor de Node-versie, en moet die in "
+            "package.json 'engines' komen?",
+            "Zullen we de tekst in de footer aanpassen?",
+        ]:
+            with self.subTest(vraag=vraag[:40]):
+                self.assertIsNone(motor.is_forbidden(self._vraag(vraag)),
+                                  "geweigerd op gewone taal")
+
+    def test_de_echt_gevaarlijke_vragen_worden_wel_gepakt(self):
+        """Eén treffer is genoeg: dit zijn geen woorden die per ongeluk in een
+        vraag over documentatie belanden."""
+        motor = self._motor(self.LANG)
+        for vraag in [
+            "Moet CLAUDE.md gecorrigeerd worden waar het zegt dat er geen "
+            "Shopify-integratie is?",
+            "Mogen we het product publiceren naar de webshop?",
+            "Moeten we de voorraad van dit racket bijwerken?",
+            "Zullen we dit deployen naar productie?",
+            "Mag deze branch gemerged worden?",
+        ]:
+            with self.subTest(vraag=vraag[:40]):
+                self.assertIsNotNone(motor.is_forbidden(self._vraag(vraag)),
+                                     "kwam er ongemoeid doorheen")
+
+    def test_een_echte_overlap_blijft_weigeren_en_noemt_het_bewijs(self):
+        """De regel zelf blijft werken; alleen gewone woorden tellen niet mee.
+        En de melding moet zeggen waarop hij afging, anders is een onterechte
+        weigering niet van een terechte te onderscheiden."""
+        motor = self._motor("Nooit een fabrikantprijs of een leveranciersmarge "
+                            "automatisch overnemen.")
+        reden = motor.is_forbidden(
+            self._vraag("Mag de fabrikantprijs uit de leveranciersmarge afgeleid worden?"))
+        self.assertIsNotNone(reden)
+        self.assertIn("op de woorden", reden)
