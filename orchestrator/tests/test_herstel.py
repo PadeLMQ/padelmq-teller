@@ -327,3 +327,29 @@ class OpgegevenNaBudget(TempCase):
         soorten = [e["kind"] for e in scope.events(limit=50)]
         self.assertNotIn("budget-hervat", soorten)
         self.assertIn(tid, uitkomst.hervatte_taken)   # via de gewone herstelweg
+
+
+class LangeReeksHerstelmeldingen(TempCase):
+    """De budgetstop mag niet uit beeld raken doordat het herstel blijft loggen.
+
+    Mijn eerste opzet keek twaalf gebeurtenissen terug. Het herstel logt elke
+    ronde opnieuw, dus na een half uur stond de budgetstop daarbuiten en raakte
+    taak 3 alsnog definitief kwijt -- de fout die ik net had willen repareren.
+    """
+
+    def test_honderd_herstelmeldingen_verbergen_de_budgetstop_niet(self):
+        from orchestrator.models import TaskStatus
+        from orchestrator.recovery import recover
+
+        self.db.ensure_project("p")
+        scope = self.db.scope("p")
+        tid = scope.add_task("lang gestrand", acceptance=["werkt"])
+        scope.set_task(tid, status=TaskStatus.FAILED.value)
+        scope.log("budget", {"niveau": "taak 3", "grens": 2.0, "dag": "2026-09-06"},
+                  task_id=tid)
+        for _ in range(100):
+            scope.log("herstel-opgegeven", {"pogingen": 3}, task_id=tid)
+
+        self.settings.budget_task_eur = 5.0
+        self.assertIn(tid, recover(scope, self.settings,
+                                   vandaag="2026-09-06").hervatte_taken)

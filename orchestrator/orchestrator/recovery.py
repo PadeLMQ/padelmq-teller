@@ -92,6 +92,12 @@ def _al_gedaan(scope, task_id: int, soort: str) -> bool:
     return int(rij["n"]) > 0
 
 
+# Gebeurtenissen van het herstel zelf. Ze zeggen niets over de taak: ze zijn
+# het gevolg van wat er misging, niet iets wat daarna gebeurd is.
+DOORKIJKEN = ("herstel-opgegeven", "hersteld", "budget-hervat",
+              "blokkade-zonder-vraag", "run-verweesd")
+
+
 def _laatste_budgetstop(scope, task_id: int):
     """De meest recente gebeurtenis van deze taak, als dat een budgetstop was.
 
@@ -102,22 +108,22 @@ def _laatste_budgetstop(scope, task_id: int):
     # gevolg van de budgetstop, niet iets wat daarna is gebeurd. Taak 3 raakte
     # hierdoor definitief kwijt -- de laatste gebeurtenis was
     # 'herstel-opgegeven', dus de budgetstop eronder werd niet meer gezien.
-    DOORKIJKEN = ("herstel-opgegeven", "hersteld", "budget-hervat",
-                  "blokkade-zonder-vraag", "run-verweesd")
-    for rij in scope.conn.execute(
+    # Niet met een vast venster: het herstel logt elke ronde opnieuw, dus na een
+    # half uur staat de budgetstop honderd gebeurtenissen terug. Mijn eerste
+    # opzet keek twaalf terug en verloor taak 3 daardoor alsnog. De database
+    # slaat ze over.
+    plaatsen = ",".join("?" * len(DOORKIJKEN))
+    rij = scope.conn.execute(
         "SELECT kind, payload FROM events WHERE project_id = ? AND task_id = ?"
-        " ORDER BY id DESC LIMIT 12",
-        (scope.project_id, task_id),
-    ).fetchall():
-        if rij["kind"] in DOORKIJKEN:
-            continue
-        if rij["kind"] != "budget":
-            return None
-        try:
-            return json.loads(rij["payload"] or "{}")
-        except (TypeError, ValueError):
-            return {}
-    return None
+        f" AND kind NOT IN ({plaatsen}) ORDER BY id DESC LIMIT 1",
+        (scope.project_id, task_id, *DOORKIJKEN),
+    ).fetchone()
+    if rij is None or rij["kind"] != "budget":
+        return None
+    try:
+        return json.loads(rij["payload"] or "{}")
+    except (TypeError, ValueError):
+        return {}
 
 
 def budget_ruimer_dan(gegevens: dict, settings, vandaag: str) -> bool:
