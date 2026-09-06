@@ -302,6 +302,14 @@ class Runner:
 
         # 0 · baseline
         self.scope.set_task(task_id, status=TaskStatus.BASELINE.value)
+        # Eerst de omgeving klaarzetten. Draait de baseline op een map zonder
+        # afhankelijkheden, dan is hij rood om een reden die niets met het
+        # project te maken heeft, en dan geldt élke latere rode check als "stond
+        # al rood". Dat zou de regressiebewaking uitschakelen.
+        mislukt = self._voorbereiden(task_id, self.project.repo_root, "de kloon")
+        if mislukt is not None:
+            self.scope.end_run(run_id, mislukt.status.value)
+            return mislukt
         baseline = self.verifier.run(self.project.repo_root, self.project.checks)
         if self.project.checks and not baseline.ok:
             # Rood op main houdt de taak niet meer tegen. Vaak is dat juist wat
@@ -323,6 +331,10 @@ class Runner:
             worktree = self.git.create_worktree(
                 self.project.repo_root, branch, self.project.default_branch
             )
+            mislukt = self._voorbereiden(task_id, worktree.path, "de worktree")
+            if mislukt is not None:
+                self.scope.end_run(run_id, mislukt.status.value)
+                return mislukt
 
             # 0b · is er nog bruikbaar werk van een eerdere poging?
             hervat = self._resume_phase(task_id, run_id, task, acceptance, worktree)
@@ -647,6 +659,39 @@ class Runner:
             if len(regel) > 3 and not regel.startswith("??"):
                 namen.add(regel[3:].strip())
         return namen
+
+    def _voorbereiden(self, task_id: int, pad, waar: str):
+        """Zet de afhankelijkheden klaar. Mislukt dat, dan is dat een
+        omgevingsprobleem en geen rode verificatie.
+
+        Het verschil is belangrijk genoeg om te blokkeren in plaats van door te
+        gaan: doorgaan zou betekenen dat er betaald wordt voor een
+        implementatieronde waarvan de uitslag niets bewijst. Dat is defect D-10,
+        en dat kostte al een keer geld.
+        """
+        from .voorbereiding import VoorbereidingMislukt, zorg_voor
+
+        if not self.project.prepare:
+            return None
+        try:
+            uitkomst = zorg_voor(Path(pad), self.project.prepare,
+                                 state_dir=self.project.root / "state")
+        except VoorbereidingMislukt as exc:
+            detail = (f"de voorbereiding van {waar} mislukte, dus de verificatie kan"
+                      f" niets bewijzen: {exc}")
+            self.scope.set_task(task_id, status=TaskStatus.BLOCKED.value)
+            self._log("voorbereiding-mislukt", task_id=task_id, waar=waar,
+                      commando=self.project.prepare, detail=str(exc)[:2000])
+            self.notifier.send(Message(
+                subject="Voorbereiding kon niet draaien",
+                body=detail, project=self.project.slug, urgent=True,
+                labels=["orch:block"],
+            ))
+            return RunOutcome(TaskStatus.BLOCKED, detail)
+        if uitkomst.gedraaid:
+            self._log("voorbereid", task_id=task_id, waar=waar,
+                      commando=self.project.prepare)
+        return None
 
     def _resume_phase(self, task_id: int, run_id: int, task, acceptance: list[str],
                       worktree) -> RunOutcome | None:

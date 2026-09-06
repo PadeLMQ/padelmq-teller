@@ -95,6 +95,7 @@ def provision(settings, ruw: str | None = None, *, repos_dir: str | None = None)
                 post_checks=dict(item.get("post_checks") or {}),
                 github_repo=str(item.get("github_repo") or ""),
                 default_branch=str(item.get("default_branch") or "main"),
+                prepare=str(item.get("prepare") or ""),
             )
         except ProjectError as exc:
             raise ProvisionError(f"{VARIABELE}: project {slug!r}: {exc}") from exc

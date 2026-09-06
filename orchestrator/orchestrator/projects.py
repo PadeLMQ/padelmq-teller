@@ -45,6 +45,11 @@ class Project:
     # lintcheck die pas kan slagen zodra de configuratie is toegevoegd: die in de
     # gewone checks zetten zou elke run laten stranden op baseline-rood.
     post_checks: dict[str, str] = field(default_factory=dict)
+    # Wat er moet gebeuren voordat de checks kunnen draaien: 'npm ci' en
+    # dergelijke. Een verse worktree heeft de broncode maar niet de
+    # afhankelijkheden, en een check die daarop stukloopt zegt niets over het
+    # werk. Leeg betekent: dit project heeft niets nodig.
+    prepare: str = ""
     verification_artifacts: list[str] = field(
         default_factory=lambda: ["next-env.d.ts"]
     )
@@ -74,6 +79,7 @@ class Project:
                 "branch_prefix": self.branch_prefix,
                 "verification_artifacts": self.verification_artifacts,
                 "post_checks": self.post_checks,
+                "voorbereiding": self.prepare,
                 "notify": self.notify,
             },
             sort_keys=False,
@@ -114,6 +120,7 @@ def load(settings: Settings, slug: str) -> Project:
         redact_patterns=list(raw.get("redact_patterns") or []),
         auto_merge=bool(raw.get("auto_merge", False)),
         post_checks=dict(raw.get("post_checks") or {}),
+        prepare=str(raw.get("voorbereiding") or ""),
         verification_artifacts=list(
             raw.get("verification_artifacts") or ["next-env.d.ts"]
         ),
@@ -140,13 +147,17 @@ def add(
     post_checks: dict[str, str] | None = None,
     github_repo: str = "",
     default_branch: str = "main",
+    prepare: str = "",
 ) -> Project:
     settings.ensure_dirs()
     root = project_dir(settings, slug)
     if (root / "project.yaml").exists():
         raise ProjectError(f"project {slug!r} bestaat al")
     checks = checks or {}
-    assert_safe_checks({**checks, **(post_checks or {})})  # weiger meteen bij het toevoegen, niet pas bij de eerste run
+    # Ook het voorbereidingscommando gaat door de poort: het draait met dezelfde
+    # rechten als een check en is dus geen achterdeur.
+    assert_safe_checks({**checks, **(post_checks or {}),
+                        **({"voorbereiding": prepare} if prepare else {})})  # weiger meteen bij het toevoegen, niet pas bij de eerste run
     project = Project(
         slug=slug,
         repo=repo,
@@ -155,6 +166,7 @@ def add(
         github_repo=github_repo,
         checks=checks,
         post_checks=dict(post_checks or {}),
+        prepare=prepare,
         strength=infer_strength(checks),
     )
     root.mkdir(parents=True, exist_ok=True)
