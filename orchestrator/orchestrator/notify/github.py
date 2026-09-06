@@ -65,8 +65,17 @@ class GitHubClient:
         )
         return int(result["number"])
 
-    def comment(self, repo: str, number: int, body: str) -> None:
-        self._request("POST", f"/repos/{repo}/issues/{number}/comments", {"body": body})
+    def comment(self, repo: str, number: int, body: str) -> int:
+        """Plaatst een reactie en geeft het id ervan terug.
+
+        Dat id is nodig omdat de orkestrator met de token van de eigenaar
+        schrijft: zijn eigen reactie komt bij de volgende ronde terug als een
+        reactie van de eigenaar, en zou dan als antwoord op zijn eigen vraag
+        gelezen worden. Wie zijn eigen vraag beantwoordt, vraagt niets.
+        """
+        uit = self._request("POST", f"/repos/{repo}/issues/{number}/comments",
+                            {"body": body})
+        return int(uit.get("id") or 0)  # type: ignore[union-attr]
 
     def close_issue(self, repo: str, number: int) -> None:
         self._request("PATCH", f"/repos/{repo}/issues/{number}", {"state": "closed"})

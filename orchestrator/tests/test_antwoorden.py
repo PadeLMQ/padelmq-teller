@@ -19,6 +19,8 @@ class FakeGitHub:
 
     def comment(self, repo, number, body):
         self.posted.append(body)
+        self._next_id += 1
+        return self._next_id
 
     def close_issue(self, repo, number):
         self.closed.append(number)
@@ -209,3 +211,92 @@ class KwaliteitspoortViaGitHub(TempCase):
         )
         self.assertEqual(ander.knowledge.load(), {},
                          "de kennisbasis van een ander project is aangeraakt")
+
+
+class EigenReactiesTellenNietAlsAntwoord(TempCase):
+    """De orkestrator schrijft met de token van de eigenaar.
+
+    Zijn eigen terugkoppeling komt daardoor bij de volgende ronde terug als een
+    reactie van de eigenaar. Zonder deze grens leest hij zijn eigen tekst als
+    antwoord op zijn eigen vraag. Dat gebeurde echt, op issues #3, #4 en #5 van
+    padelmq-ai-product-engine: "Ik leg dit vast als: Ik leg dit vast als: ...",
+    gevolgd door een afbreking die niemand had gegeven.
+    """
+
+    class LuisterendeGitHub:
+        """Een client die zijn eigen reacties terugmeldt, zoals GitHub doet."""
+
+        def __init__(self):
+            self.comments = []
+            self.posted = []
+            self.closed = []
+            self._next_id = 1000
+
+        def owner_comments(self, repo, number):
+            return list(self.comments)
+
+        def comment(self, repo, number, body):
+            self._next_id += 1
+            self.posted.append(body)
+            # Precies het punt: de orkestrator is de eigenaar, dus zijn reactie
+            # komt in dezelfde lijst terecht als die van een mens.
+            self.comments.append({"id": self._next_id, "body": body,
+                                  "user": {"login": "eigenaar"},
+                                  "author_association": "OWNER"})
+            return self._next_id
+
+        def close_issue(self, repo, number):
+            self.closed.append(number)
+
+        def add_owner_comment(self, body):
+            self._next_id += 1
+            self.comments.append({"id": self._next_id, "body": body,
+                                  "user": {"login": "eigenaar"},
+                                  "author_association": "OWNER"})
+
+    def setUp(self):
+        super().setUp()
+        self.project = self.make_project("demo")
+        self.project.github_repo = "eigenaar/demo"
+        self.scope = self.db.scope("demo")
+        self.task_id = self.scope.add_task("Wachtende taak", acceptance=["werkt"])
+        self.question_id = self.scope.add_question(
+            "Moet README.md dezelfde verduidelijking krijgen?", "block", "vv-1",
+            task_id=self.task_id)
+        self.scope.set_question(self.question_id, issue_number=42)
+        self.scope.set_task(self.task_id, status=TaskStatus.BLOCKED.value,
+                            blocked_by_question=self.question_id)
+
+    def test_een_tweede_ronde_leest_de_eigen_terugkoppeling_niet_als_antwoord(self):
+        client = self.LuisterendeGitHub()
+        client.add_owner_comment("JA. Maak README.md consistent.")
+
+        process_answers(scope=self.scope, project=self.project, client=client)
+        na_ronde_1 = len(client.posted)
+        self.assertEqual(na_ronde_1, 1, "de eerste ronde hoort één keer terug te koppelen")
+
+        # Tweede ronde: er is geen nieuwe reactie van een mens bijgekomen.
+        process_answers(scope=self.scope, project=self.project, client=client)
+        self.assertEqual(len(client.posted), na_ronde_1,
+                         "de orkestrator reageerde op zijn eigen reactie")
+
+        for _ in range(3):
+            process_answers(scope=self.scope, project=self.project, client=client)
+        self.assertEqual(len(client.posted), na_ronde_1,
+                         "de lus voedt zichzelf nog steeds")
+        self.assertNotIn("Ik leg dit vast als: Ik leg dit vast als:",
+                         "\n".join(client.posted))
+
+    def test_een_echte_bevestiging_wordt_wel_opgepakt(self):
+        """De grens mag geen mens buitensluiten."""
+        client = self.LuisterendeGitHub()
+        client.add_owner_comment("JA. Maak README.md consistent.")
+        process_answers(scope=self.scope, project=self.project, client=client)
+
+        client.add_owner_comment("Ja, klopt.")
+        process_answers(scope=self.scope, project=self.project, client=client)
+
+        rij = self.scope.question(self.question_id)
+        self.assertEqual(rij["status"], "answered",
+                         "de bevestiging van een mens werd niet verwerkt")
+        self.assertIn(42, client.closed)
