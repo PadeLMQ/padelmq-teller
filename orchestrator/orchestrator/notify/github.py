@@ -58,6 +58,30 @@ class GitHubClient:
         rij = self._request("GET", "/user")
         return str(rij.get("login") or "(onbekende login)")  # type: ignore[union-attr]
 
+    def _alle_paginas(self, path: str) -> list:
+        """Elke pagina, niet alleen de eerste.
+
+        GitHub geeft standaard 30 items per pagina. Wie dat vergeet krijgt een
+        blinde vlek die pas ontstaat als een gesprek lang genoeg wordt -- en dan
+        precies bij de issues waar het meeste gebeurd is. Op issue #4 van
+        padelmq-ai-product-engine stond de beslissing van de eigenaar op plek
+        32; de orkestrator zag hem nooit en wachtte op iets dat er al was.
+
+        We vragen 100 per pagina en lopen door tot een pagina niet vol zit.
+        """
+        uit: list = []
+        scheiding = "&" if "?" in path else "?"
+        for pagina in range(1, 51):  # 5000 items; daarna is er iets anders mis
+            rijen = self._request(
+                "GET", f"{path}{scheiding}per_page=100&page={pagina}"
+            )
+            if not isinstance(rijen, list) or not rijen:
+                break
+            uit.extend(rijen)
+            if len(rijen) < 100:
+                break
+        return uit
+
     def create_issue(self, repo: str, title: str, body: str, labels: list[str]) -> int:
         result = self._request(
             "POST", f"/repos/{repo}/issues",
@@ -83,7 +107,7 @@ class GitHubClient:
     def owner_comments(self, repo: str, number: int) -> list[dict]:
         """Reacties van de repo-eigenaar; alleen die tellen als antwoord."""
         owner = repo.split("/", 1)[0].lower()
-        comments = self._request("GET", f"/repos/{repo}/issues/{number}/comments")
+        comments = self._alle_paginas(f"/repos/{repo}/issues/{number}/comments")
         out = []
         for comment in comments:  # type: ignore[union-attr]
             author = (comment.get("user") or {}).get("login", "").lower()
@@ -98,8 +122,8 @@ class GitHubClient:
         Alleen issues: de GitHub-API geeft pull requests terug in dezelfde lijst,
         en een PR is geen opdracht.
         """
-        rijen = self._request(
-            "GET", f"/repos/{repo}/issues?state=open&labels={label}&sort=created&direction=asc"
+        rijen = self._alle_paginas(
+            f"/repos/{repo}/issues?state=open&labels={label}&sort=created&direction=asc"
         )
         return [r for r in rijen if "pull_request" not in r]  # type: ignore[union-attr]
 

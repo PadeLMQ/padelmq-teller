@@ -300,3 +300,70 @@ class EigenReactiesTellenNietAlsAntwoord(TempCase):
         self.assertEqual(rij["status"], "answered",
                          "de bevestiging van een mens werd niet verwerkt")
         self.assertIn(42, client.closed)
+
+
+class Paginering(TempCase):
+    """Een antwoord op plek 31 is geen antwoord dat er niet is.
+
+    GitHub geeft standaard 30 items per pagina. owner_comments() haalde er maar
+    één op. Op issue #4 van padelmq-ai-product-engine stond de beslissing van de
+    eigenaar op plek 32: de orkestrator wachtte op iets dat er al ruim tien
+    minuten stond.
+
+    De blinde vlek ontstaat pas als een gesprek lang genoeg wordt, dus precies
+    bij de issues waar het meeste gebeurd is. Daarom staat hij hier vast.
+    """
+
+    class GepagineerdeAPI:
+        """Bootst GitHub na: 30 per pagina tenzij er per_page wordt gevraagd."""
+
+        def __init__(self, aantal: int):
+            self.items = [{"id": 1000 + i, "body": f"reactie {i}",
+                           "user": {"login": "eigenaar"},
+                           "author_association": "OWNER"} for i in range(aantal)]
+            self.opgevraagd: list[str] = []
+
+        def __call__(self, methode, pad, payload=None):
+            self.opgevraagd.append(pad)
+            import urllib.parse as up
+            vraag = up.parse_qs(up.urlparse(pad).query)
+            per = int(vraag.get("per_page", [30])[0])
+            pagina = int(vraag.get("page", [1])[0])
+            begin = (pagina - 1) * per
+            return self.items[begin:begin + per]
+
+    def _client(self, aantal):
+        from orchestrator.notify.github import GitHubClient
+
+        client = GitHubClient(token="x")
+        api = self.GepagineerdeAPI(aantal)
+        client._request = api
+        return client, api
+
+    def test_alle_reacties_komen_mee_ook_voorbij_de_eerste_pagina(self):
+        client, _ = self._client(32)
+        gevonden = client.owner_comments("eigenaar/repo", 4)
+        self.assertEqual(len(gevonden), 32,
+                         "reacties voorbij de eerste pagina werden niet gezien")
+        self.assertEqual(gevonden[-1]["id"], 1031)
+
+    def test_precies_dertig_haalt_geen_overbodige_pagina_op(self):
+        """Een volle pagina van 100 vraagt de volgende op; 30 is niet vol."""
+        client, api = self._client(30)
+        self.assertEqual(len(client.owner_comments("eigenaar/repo", 4)), 30)
+        self.assertEqual(len(api.opgevraagd), 1)
+
+    def test_meer_dan_honderd_werkt_ook(self):
+        client, _ = self._client(250)
+        self.assertEqual(len(client.owner_comments("eigenaar/repo", 4)), 250)
+
+    def test_geen_reacties_is_geen_fout(self):
+        client, _ = self._client(0)
+        self.assertEqual(client.owner_comments("eigenaar/repo", 4), [])
+
+    def test_opdrachten_ophalen_pagineert_ook(self):
+        """Dezelfde fout zou een opdracht onzichtbaar maken."""
+        client, _ = self._client(45)
+        for item in client._request.items:
+            item["labels"] = [{"name": "orch:task"}]
+        self.assertEqual(len(client.issues_with_label("eigenaar/repo", "orch:task")), 45)
