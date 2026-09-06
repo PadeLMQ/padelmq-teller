@@ -123,8 +123,11 @@ class Budgetgrenzen(TempCase):
         from orchestrator.config import Settings
 
         s = Settings.from_env()
-        self.assertLess(s.budget_run_eur, s.budget_task_eur,
-                        "zonder rongrens onder de taakgrens is er geen rem per ronde")
+        # Met tegenzin <=: de schatting vóór een aanroep bleek er tot achtvoudig
+        # naast te zitten ($4,2903 verbruikt voor de poort aansloeg), en een
+        # rongrens onder de taakgrens weigert dan de tweede aanroep van elke taak.
+        self.assertLessEqual(s.budget_run_eur, s.budget_task_eur,
+                             "een run mag nooit meer mogen dan de taak waar hij bij hoort")
         self.assertLessEqual(s.budget_task_eur, s.budget_project_daily_eur,
                              "één taak mag het dagbudget van een project niet kunnen opmaken")
         self.assertLessEqual(s.budget_project_daily_eur, s.budget_global_daily_eur,

@@ -58,13 +58,18 @@ class Settings:
     # liep stuk op $2,1448 tegen een grens van $2,00, en het echte werk aan de
     # Product Engine is groter. De remmen blijven bestaan; ze staan hoger.
     #
-    # De rongrens is meegegaan naar de helft van de taakgrens. Zonder dat zou
-    # de taakgrens onbruikbaar zijn: één implementatieronde kost gemeten al
-    # meer dan een dollar, en de rongrens knijpt eerder dan de taakgrens.
+    # De rongrens staat gelijk aan de taakgrens, en dat is met tegenzin.
+    # Gemeten op 2026-09-06: één ronde had al $4,2903 verbruikt voordat de
+    # poort aansloeg. De poort toetst besteed + GESCHAT vóór elke aanroep, dus
+    # een aanroep die veel duurder uitvalt dan geschat glipt erdoor en pas de
+    # volgende wordt geweigerd. Een rongrens onder de taakgrens is daardoor
+    # geen rem maar een blokkade: hij weigert de tweede aanroep van elke taak.
+    # De taakgrens doet het remwerk; de dag- en totaalgrens vangen de rest.
+    # Wat dit werkelijk vraagt is een betere schatting -- zie het rapport.
     budget_global_daily_eur: float = 15.0
     budget_project_daily_eur: float = 15.0
     budget_task_eur: float = 5.0
-    budget_run_eur: float = 2.5
+    budget_run_eur: float = 5.0
 
     # De munt waarin de tarieven zijn ingevuld. Alleen een etiket: er wordt
     # nergens omgerekend, dus dit moet kloppen met wat je in de tarieven zet.
@@ -92,7 +97,7 @@ class Settings:
             budget_global_daily_eur=_env_float("ORCH_BUDGET_GLOBAL_DAILY_EUR", 15.0),
             budget_project_daily_eur=_env_float("ORCH_BUDGET_PROJECT_DAILY_EUR", 15.0),
             budget_task_eur=_env_float("ORCH_BUDGET_TASK_EUR", 5.0),
-            budget_run_eur=_env_float("ORCH_BUDGET_RUN_EUR", 2.5),
+            budget_run_eur=_env_float("ORCH_BUDGET_RUN_EUR", 5.0),
         )
         reviewer_in = os.environ.get("ORCH_REVIEWER_PRICE_IN")
         reviewer_out = os.environ.get("ORCH_REVIEWER_PRICE_OUT")
