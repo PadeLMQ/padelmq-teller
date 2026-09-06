@@ -333,7 +333,7 @@ def cmd_startup(args) -> int:
 
 def cmd_serve(args) -> int:
     """Blijf draaien: herstellen, antwoorden ophalen, werk afwerken."""
-    from .answers import process_answers
+    from .answers import process_answers, verval_gemarkeerde_vragen
     from .intake import intake
     from .notify.github import GitHubClient
     from .serve import Serve
@@ -379,6 +379,12 @@ def cmd_serve(args) -> int:
             project = projects_mod.load(settings, slug)
             if not project.github_repo:
                 continue
+            # Eerst de vervallen vragen: een vraag die niet te beantwoorden is
+            # moet weg kunnen zonder dat er een antwoord van gemaakt wordt.
+            for actie in verval_gemarkeerde_vragen(
+                    scope=db.scope(slug), project=project, client=GitHubClient()):
+                print(f"[{slug}] {actie}")
+                totaal += 1
             for actie in process_answers(scope=db.scope(slug), project=project,
                                          client=GitHubClient()):
                 print(f"[{slug}] antwoord: {actie}")

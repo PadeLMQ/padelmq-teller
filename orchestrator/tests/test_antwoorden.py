@@ -367,3 +367,81 @@ class Paginering(TempCase):
         for item in client._request.items:
             item["labels"] = [{"name": "orch:task"}]
         self.assertEqual(len(client.issues_with_label("eigenaar/repo", "orch:task")), 45)
+
+
+class VervallenVraag(TempCase):
+    """Een vraag die niet te beantwoorden is moet kunnen vervallen.
+
+    Vraag #7 van padelmq-ai-product-engine bood als enige optie de broncode-regel
+    met een verzonnen EAN erin. Het enige beantwoordbare antwoord was daarmee een
+    bevestiging van precies wat die poort moest tegenhouden. Zo'n vraag mag niet
+    beantwoord worden om er vanaf te zijn: er mag nergens komen te staan dat de
+    verzonnen waarde klopt.
+    """
+
+    class Client:
+        def __init__(self, gemarkeerd=()):
+            self.gemarkeerd = list(gemarkeerd)
+            self.posted = []
+            self.closed = []
+
+        def issues_with_label(self, repo, label):
+            from orchestrator.answers import VERVALLABEL
+            return [{"number": n} for n in self.gemarkeerd] if label == VERVALLABEL else []
+
+        def owner_comments(self, repo, number):
+            return []
+
+        def comment(self, repo, number, body):
+            self.posted.append((number, body)); return 999
+
+        def close_issue(self, repo, number):
+            self.closed.append(number)
+
+    def setUp(self):
+        super().setUp()
+        self.project = self.make_project("demo")
+        self.project.github_repo = "eigenaar/demo"
+        self.scope = self.db.scope("demo")
+        self.task_id = self.scope.add_task("Variant-resolver", acceptance=["werkt"])
+        self.qid = self.scope.add_question(
+            "Waar komt de waarde 8712345678906 vandaan?", "block", "vv-ean",
+            task_id=self.task_id)
+        self.scope.set_question(self.qid, issue_number=24)
+        self.scope.set_task(self.task_id, status=TaskStatus.BLOCKED.value,
+                            blocked_by_question=self.qid)
+
+    def _verval(self, client):
+        from orchestrator.answers import verval_gemarkeerde_vragen
+        return verval_gemarkeerde_vragen(scope=self.scope, project=self.project,
+                                         client=client)
+
+    def test_de_taak_gaat_terug_in_de_wachtrij(self):
+        acties = self._verval(self.Client([24]))
+        self.assertTrue(acties)
+        self.assertEqual(self.scope.task(self.task_id)["status"], TaskStatus.QUEUED.value)
+        self.assertEqual(self.scope.question(self.qid)["status"], "vervallen")
+        self.assertIn(24, self.Client([24]).gemarkeerd)
+
+    def test_er_wordt_geen_beslissing_en_geen_kennisitem_vastgelegd(self):
+        """Dit is de kern: nergens mag komen te staan dat de waarde klopt."""
+        self._verval(self.Client([24]))
+
+        rij = self.scope.question(self.qid)
+        self.assertIsNone(rij["answer"], "er is een antwoord vastgelegd")
+        items = self.project.knowledge.load()
+        self.assertEqual(items, {}, "er is een kennisitem aangemaakt")
+
+    def test_de_audittrail_zegt_dat_hij_vervallen_is_en_waarom(self):
+        self._verval(self.Client([24]))
+        soorten = {e["kind"] for e in self.scope.events(limit=50)}
+        self.assertIn("vraag-vervallen", soorten)
+        self.assertNotIn("beslissing", soorten)
+
+    def test_zonder_label_gebeurt_er_niets(self):
+        self.assertEqual(self._verval(self.Client([])), [])
+        self.assertEqual(self.scope.task(self.task_id)["status"], TaskStatus.BLOCKED.value)
+
+    def test_een_ander_gemarkeerd_issue_raakt_deze_vraag_niet(self):
+        self.assertEqual(self._verval(self.Client([99])), [])
+        self.assertEqual(self.scope.question(self.qid)["status"], "open")
