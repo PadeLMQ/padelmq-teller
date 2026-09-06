@@ -445,3 +445,27 @@ class G15_HandtekeningPasNaEenEchteAanroep(Lus):
             "SELECT signature FROM signatures WHERE task_id = ?", (task_id,))]
         self.assertTrue(any(r["signature"].startswith("impl:") for r in handtekening),
                         "de verstuurde opdracht is niet onthouden")
+
+
+class VastloperHeeftEenWegTerug(TempCase):
+    """Een taak die rondraait moet te beantwoorden zijn, niet doodlopen.
+
+    De herhalingspoort is goed: dezelfde diff bij dezelfde kennis en dezelfde
+    verificatie-uitslag opnieuw laten beoordelen kost geld en levert hetzelfde
+    op. Maar hij zette de taak op BLOCKED zonder vraag, en dan is er geen enkele
+    route terug -- ook niet voor de eigenaar. Dat overkwam taak #1 van
+    padelmq-ai-product-engine op 2026-09-06.
+    """
+
+    def test_de_vastloper_levert_een_beantwoordbare_vraag_op(self):
+        import inspect
+
+        from orchestrator.runner import Runner
+
+        bron = inspect.getsource(Runner)
+        kop = bron[bron.index("last_review_signature\") == handtekening"):]
+        blok = kop[:kop.index("self.scope.end_run(run_id, \"herhaalde_beoordeling\")")]
+        self.assertIn("_park_or_block", blok,
+                      "de vastloper legt geen vraag vast en is dus niet te beantwoorden")
+        self.assertIn("options=[", blok,
+                      "zonder opties moet de eigenaar zelf bedenken wat de keuzes zijn")

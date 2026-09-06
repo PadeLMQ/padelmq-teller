@@ -929,13 +929,30 @@ class Runner:
                     " verificatie-uitslag al beoordeeld. Er is niets veranderd, dus"
                     " nog een beoordeling levert hetzelfde op."
                 )
-                self.scope.set_task(task_id, status=TaskStatus.BLOCKED.value)
+                # Dit als kale melding afdoen maakte er een doodlopende weg van:
+                # geblokkeerd, geen vraag, dus geen enkele route terug. Het wordt
+                # nu een echte vraag, zodat de gewone antwoordmachinerie de taak
+                # weer op gang kan brengen zodra iemand zegt hoe.
+                vraag = Question(
+                    text=(
+                        f"Taak #{task_id} ({task['title']}) draait rond: de uitvoerder"
+                        " leverde na de vorige beoordeling exact dezelfde diff op."
+                        " Hoe gaan we verder?"
+                    ),
+                    why_blocking=detail,
+                    options=[
+                        "Opnieuw proberen; de beoordelaar mag dezelfde diff nog een"
+                        " keer bekijken.",
+                        "De opdracht is te ruim of te vaag; ik pas de"
+                        " acceptatiecriteria aan en dien hem opnieuw in.",
+                        "Het werk zoals het er nu ligt is goed genoeg; leg het vast"
+                        " en open een pull request.",
+                    ],
+                    category="werkwijze",
+                    task_id=task_id,
+                )
                 self._log("herhaalde-beoordeling", task_id=task_id, detail=detail)
-                self.notifier.send(Message(
-                    subject=f"Vastgelopen zonder nieuwe toestand: {task['title'][:50]}",
-                    body=detail, project=self.project.slug, urgent=True,
-                    labels=["orch:block"],
-                ))
+                self._park_or_block(task_id, vraag, Triage.BLOCK, detail)
                 self.scope.end_run(run_id, "herhaalde_beoordeling")
                 return RunOutcome(TaskStatus.BLOCKED, detail)
             self.scope.set_task(task_id, last_review_signature=handtekening)
