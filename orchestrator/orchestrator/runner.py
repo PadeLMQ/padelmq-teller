@@ -1186,6 +1186,20 @@ class Runner:
             "geheel, dus half werk dat een check breekt wordt niet bewaard. Kun je het "
             "eenduidige deel niet losmaken zonder iets te raken waarover de vraag gaat, "
             "doe dan niets en stel alleen de vraag.",
+            # Zonder deze regel verzint de uitvoerder een plausibel ogende
+            # waarde en gaat verder. Dat gebeurde: een bedachte EAN in een
+            # testfixture. De poort verderop houdt zoiets tegen, maar dan is de
+            # aanroep al betaald en staat de taak stil op een vraag die niemand
+            # kan beantwoorden zonder de verzinsel te bevestigen.
+            "\n## Verzin geen identificerende waarden\n"
+            "EAN, GTIN, barcode, SKU, artikelnummer, URL, prijs: zulke waarden verzin "
+            "je nooit, ook niet in een testfixture, een voorbeeld of een commentaar. "
+            "Neem ze letterlijk over uit de opdracht, uit de bevestigde projectkennis "
+            "of uit code die er al staat, en zeg erbij waar ze vandaan komen.\n\n"
+            "Heb je een waarde nodig die nergens staat, kies dan een vorm die "
+            "zichtbaar geen echte waarde is en die als zodanig benoemd is, of stel "
+            "een vraag. Een verzonnen waarde die er echt uitziet is het ergste van "
+            "de drie: die valt later niet meer van een echte te onderscheiden.",
         ]
         if answered:
             parts.append("\n## Beantwoorde vragen\n" + "\n".join(

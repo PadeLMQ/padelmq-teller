@@ -186,6 +186,22 @@ class G10_GeenBetaalde_Herhaling(Lus):
                   if r["kind"] == "herhaalde-opdracht"]
         self.assertTrue(events, "de tegengehouden herhaling is niet vastgelegd")
 
+    def test_de_opdracht_verbiedt_verzonnen_identificerende_waarden(self):
+        """De poort verderop houdt ze tegen, maar dan is er al betaald.
+
+        Een bedachte EAN in een testfixture kostte een volledige uitvoerdersronde
+        plus een vraag die zonder het verzinsel te bevestigen niet te beantwoorden
+        was. Het goedkoopste moment om dat te voorkomen is de opdracht zelf.
+        """
+        runner = self.build(steps=[{"write": {"a.py": "x = 1\n"}}])
+        task_id = self.task(runner)
+
+        prompt = runner._build_prompt(self.scope.task(task_id), ["werkt"], [])
+
+        self.assertIn("Verzin geen identificerende waarden", prompt)
+        for woord in ("EAN", "SKU", "testfixture"):
+            self.assertIn(woord, prompt)
+
     def test_gewijzigde_toestand_mag_wel_opnieuw(self):
         """Nieuwe informatie of een gewijzigde werkmap rechtvaardigt een nieuwe poging."""
         from orchestrator.adapters import ReviewResult
