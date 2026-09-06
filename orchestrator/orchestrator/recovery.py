@@ -67,11 +67,38 @@ class Herstel:
         return uit
 
 
+# Gebeurtenissen van het herstel zelf. Ze zeggen niets over de taak: ze zijn
+# het gevolg van wat er misging, niet iets wat daarna gebeurd is.
+DOORKIJKEN = ("herstel-opgegeven", "hersteld", "budget-hervat",
+              "blokkade-zonder-vraag", "run-verweesd")
+
+
 def _herstelpogingen(scope, task_id: int) -> int:
+    """Hoe vaak is deze taak omgevallen ZONDER er iets voor terug te doen?
+
+    Eerst telde dit alle herstelpogingen van de hele levensloop van de taak.
+    Dat maakte van de grens een levenslange quota: taak 3 van
+    padelmq-ai-product-engine had er 's ochtends drie verbruikt, deed daarna een
+    volledige ronde met uitvoering, verificatie en beoordeling, en werd bij de
+    eerstvolgende onderbreking meteen als hopeloos afgeschreven. Die
+    onderbreking was een herstart van de container na een wijziging in de
+    omgeving -- niet iets wat de taak fout deed.
+
+    De grens hoort te gaan over vastlopen, niet over pech. Dus tellen we alleen
+    de pogingen sinds de taak voor het laatst werkelijk iets gedaan heeft.
+    Boekhouding van het herstel zelf telt daarbij niet als iets gedaan hebben;
+    anders zou de teller zichzelf elke ronde resetten.
+    """
+    plaatsen = ",".join("?" * len(DOORKIJKEN))
+    laatste = scope.conn.execute(
+        "SELECT COALESCE(MAX(id), 0) AS id FROM events WHERE project_id = ?"
+        f" AND task_id = ? AND kind NOT IN ({plaatsen})",
+        (scope.project_id, task_id, *DOORKIJKEN),
+    ).fetchone()
     rijen = scope.conn.execute(
         "SELECT COUNT(*) AS n FROM events WHERE project_id = ? AND task_id = ?"
-        " AND kind = 'hersteld'",
-        (scope.project_id, task_id),
+        " AND kind = 'hersteld' AND id > ?",
+        (scope.project_id, task_id, int(laatste["id"])),
     ).fetchone()
     return int(rijen["n"])
 
@@ -90,12 +117,6 @@ def _al_gedaan(scope, task_id: int, soort: str) -> bool:
         (scope.project_id, task_id, soort),
     ).fetchone()
     return int(rij["n"]) > 0
-
-
-# Gebeurtenissen van het herstel zelf. Ze zeggen niets over de taak: ze zijn
-# het gevolg van wat er misging, niet iets wat daarna gebeurd is.
-DOORKIJKEN = ("herstel-opgegeven", "hersteld", "budget-hervat",
-              "blokkade-zonder-vraag", "run-verweesd")
 
 
 def _laatste_budgetstop(scope, task_id: int):

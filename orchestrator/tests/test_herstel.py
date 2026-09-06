@@ -97,6 +97,42 @@ class Herstellen(TempCase):
         events = [r for r in self.scope.events(limit=50) if r["kind"] == "herstel-opgegeven"]
         self.assertTrue(events, "het opgeven is niet vastgelegd")
 
+    def test_echte_voortgang_zet_de_teller_terug(self):
+        """De grens gaat over vastlopen, niet over pech.
+
+        Taak 3 van padelmq-ai-product-engine verbruikte 's ochtends drie
+        pogingen, deed daarna een volledige ronde met uitvoering, verificatie en
+        beoordeling, en werd bij de eerstvolgende onderbreking -- een herstart
+        van de container na een wijziging in de omgeving -- meteen afgeschreven.
+        """
+        task_id = self._taak(TaskStatus.FAILED.value)
+        for _ in range(MAX_HERSTELPOGINGEN):
+            recover(self.scope)
+            self.scope.set_task(task_id, status=TaskStatus.FAILED.value)
+
+        # De taak doet werkelijk iets: een uitvoerdersronde met een beoordeling.
+        self.scope.log("uitvoering", {"samenvatting": "resolver geschreven"},
+                       task_id=task_id)
+        self.scope.log("beoordeling", {"oordeel": "herzien"}, task_id=task_id)
+        self.scope.set_task(task_id, status=TaskStatus.IMPLEMENTING.value)
+
+        herstel = recover(self.scope)
+
+        self.assertIn(task_id, herstel.hervatte_taken)
+        self.assertNotIn(task_id, herstel.opgegeven_taken)
+        self.assertEqual(self.scope.task(task_id)["status"], TaskStatus.QUEUED.value)
+
+    def test_boekhouding_van_het_herstel_telt_niet_als_voortgang(self):
+        """Anders zet de teller zichzelf elke ronde terug en stopt hij nooit."""
+        task_id = self._taak(TaskStatus.FAILED.value)
+        for _ in range(MAX_HERSTELPOGINGEN):
+            recover(self.scope)
+            self.scope.set_task(task_id, status=TaskStatus.FAILED.value)
+
+        herstel = recover(self.scope)
+
+        self.assertIn(task_id, herstel.opgegeven_taken)
+
     def test_herstel_blijft_binnen_het_project(self):
         ander = self.make_project("ander")
         ander_scope = self.db.scope("ander")
