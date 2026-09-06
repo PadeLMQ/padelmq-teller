@@ -95,3 +95,29 @@ class Publicatie(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class FoutenZichtbaar(TempCase):
+    """Een ronde die stilletjes omvalt moet op het bord staan.
+
+    Taak 2 stond twintig minuten op 'queued' terwijl de lus draaide. De fout die
+    dat veroorzaakte werd wel in de hartslag bewaard, maar stond nergens waar
+    iemand hem kon zien -- en dus leek een kapotte ronde op een rustige ronde.
+    """
+
+    def setUp(self):
+        super().setUp()
+        self.make_project("demo")
+        self.db.ensure_project("demo")
+
+    def test_de_laatste_fout_staat_op_het_bord(self):
+        tekst = bouw(self.db, self.settings, ["demo"],
+                     {"rondes": 4, "laatste_ronde": "2026-09-06T12:47:03+00:00",
+                      "laatste_fout": "werk afwerken mislukte: GitError: kapot"})
+        self.assertIn("Laatste fout", tekst)
+        self.assertIn("GitError: kapot", tekst)
+
+    def test_zonder_fout_staat_er_geen(self):
+        tekst = bouw(self.db, self.settings, ["demo"],
+                     {"rondes": 4, "laatste_ronde": "x", "laatste_fout": None})
+        self.assertIn("Laatste fout** — geen", tekst)

@@ -51,8 +51,18 @@ def bouw(db, settings, slugs, hartslag=None) -> str:
             f" {hartslag.get('laatste_ronde')}"
             + (f" ({stil}s geleden)" if stil is not None else ""),
             f"**Noodstop** — {'AAN' if settings.paused() else 'uit'}",
-            "",
         ]
+        # De laatste fout van de lus hoort hier te staan. Zonder dit is een
+        # ronde die elke keer stilletjes op dezelfde fout omvalt van buitenaf
+        # niet te onderscheiden van een ronde die niets te doen had -- en dan
+        # blijft een taak in de wachtrij staan zonder dat iemand ziet waarom.
+        fout = hartslag.get("laatste_fout")
+        regels.append(f"**Laatste fout** — `{fout}`" if fout
+                      else "**Laatste fout** — geen")
+        werk = hartslag.get("laatste_werk")
+        if werk:
+            regels.append(f"**Laatste werk** — {werk}")
+        regels.append("")
 
     for slug in slugs:
         scope = db.scope(slug)

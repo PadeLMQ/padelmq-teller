@@ -452,6 +452,8 @@ def cmd_serve(args) -> int:
             if rij is not None:
                 hart["rondes"] = rij["rondes"]
                 hart["laatste_ronde"] = rij["laatste_ronde"]
+                hart["laatste_fout"] = rij["laatste_fout"]
+                hart["laatste_werk"] = rij["laatste_werk"]
             tekst = bouw(db, settings, slugs, hart)
             repos = []
             for slug in slugs:
