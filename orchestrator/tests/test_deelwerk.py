@@ -119,3 +119,37 @@ class Deelwerk(TempCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class VastloperLegtHetWerkVast(TempCase):
+    """Bij een rondraaiende taak moet het werk zichtbaar worden.
+
+    Taak #1 van padelmq-ai-product-engine draaide in een kring: de vastloper
+    bood optie 3 aan ("leg het vast en open een pull request"), dat antwoord
+    werd als beslissing opgeslagen, en daarna liep de lus gewoon opnieuw tegen
+    dezelfde poort. Er was geen enkel pad waarlangs die optie werkelijk werd
+    uitgevoerd, en de diff was nergens te zien.
+    """
+
+    def test_de_diff_wordt_vastgelegd_voordat_de_vraag_gesteld_wordt(self):
+        import inspect
+
+        from orchestrator.runner import Runner
+
+        bron = inspect.getsource(Runner)
+        blok = bron[bron.index("last_review_signature\") == handtekening"):]
+        blok = blok[:blok.index("self.scope.end_run(run_id, \"herhaalde_beoordeling\")")]
+        self.assertIn("_deelwerk_vastleggen", blok,
+                      "het werk wordt niet vastgelegd, dus de diff blijft onzichtbaar")
+        self.assertLess(blok.index("_deelwerk_vastleggen"), blok.index("_park_or_block"),
+                        "eerst vastleggen, dan pas vragen -- anders staat het niet in de vraag")
+
+    def test_een_reeds_gedraaide_verificatie_wordt_hergebruikt(self):
+        """Opnieuw verifiëren kost minuten en bewijst niets nieuws."""
+        import inspect
+
+        from orchestrator.runner import Runner
+
+        bron = inspect.getsource(Runner._deelwerk_vastleggen)
+        self.assertIn("if verification is None:", bron,
+                      "de verificatie wordt onvoorwaardelijk opnieuw gedraaid")

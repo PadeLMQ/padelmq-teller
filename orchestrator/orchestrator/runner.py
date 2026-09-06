@@ -604,7 +604,8 @@ class Runner:
                 return False
         return True
 
-    def _deelwerk_vastleggen(self, task_id: int, worktree, baseline) -> str | None:
+    def _deelwerk_vastleggen(self, task_id: int, worktree, baseline,
+                             verification=None) -> str | None:
         """Legt werk vast dat al af en groen is, ook als de taak blokkeert.
 
         Zonder dit gaat een taak die op één beslissing wacht helemaal stil,
@@ -635,7 +636,8 @@ class Runner:
         if not diff.strip():
             return None
 
-        verification = self._verify(worktree, task_id=task_id)
+        if verification is None:
+            verification = self._verify(worktree, task_id=task_id)
         regressies = verification.regressies(baseline)
         if regressies:
             self._log(
@@ -952,7 +954,19 @@ class Runner:
                     task_id=task_id,
                 )
                 self._log("herhaalde-beoordeling", task_id=task_id, detail=detail)
-                self._park_or_block(task_id, vraag, Triage.BLOCK, detail)
+                # Optie 3 ("leg het vast en open een pull request") was tot nu toe
+                # niet uitvoerbaar: het antwoord werd wel als beslissing opgeslagen,
+                # maar de lus liep daarna gewoon opnieuw tegen deze poort. Taak #1
+                # van padelmq-ai-product-engine draaide daardoor in een kring.
+                #
+                # Het werk staat er al en is al geverifieerd. Het wordt nu
+                # vastgelegd en gepusht vóór de vraag, zodat de diff te zien is
+                # zonder dat er iets beantwoord hoeft te worden -- en zodat optie 3
+                # niets meer hoeft te doen dan er een pull request van maken.
+                deelwerk = self._deelwerk_vastleggen(task_id, worktree, None,
+                                                     verification=verification)
+                self._park_or_block(task_id, vraag, Triage.BLOCK, detail,
+                                    deelwerk=deelwerk)
                 self.scope.end_run(run_id, "herhaalde_beoordeling")
                 return RunOutcome(TaskStatus.BLOCKED, detail)
             self.scope.set_task(task_id, last_review_signature=handtekening)
