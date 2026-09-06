@@ -150,7 +150,8 @@ class Runner:
             )
         )
 
-    def _park_or_block(self, task_id: int, question: Question, outcome: Triage, reason: str) -> int:
+    def _park_or_block(self, task_id: int, question: Question, outcome: Triage,
+                       reason: str, deelwerk: str | None = None) -> int:
         question_id = self.scope.add_question(
             text=question.text,
             outcome=outcome.value,
@@ -171,11 +172,11 @@ class Runner:
             question=question.text, reason=reason, question_id=question_id,
         )
         if outcome is Triage.BLOCK:
-            self._notify_block(task_id, question, reason, question_id)
+            self._notify_block(task_id, question, reason, question_id, deelwerk)
         return question_id
 
     def _notify_block(self, task_id: int, question: Question, reason: str,
-                      question_id: int) -> None:
+                      question_id: int, deelwerk: str | None = None) -> None:
         """Meldt een BLOCK, precies één keer per vraag.
 
         Idempotent: heeft deze vraag al een issue, dan wordt er niets nieuws
@@ -217,8 +218,11 @@ class Runner:
              or "_geen. Er is geen bevestigde bron om iets voor te stellen._"),
             "",
             "## Wat ondertussen wel doorgaat",
-            ("\n".join(f"- {t['title']}" for t in others)
-             or "_niets; dit project wacht volledig op deze beslissing_"),
+            (deelwerk or "")
+            + ("\n" if deelwerk and others else "")
+            + ("\n".join(f"- {t['title']}" for t in others)
+               if others else
+               ("" if deelwerk else "_niets; dit project wacht volledig op deze beslissing_")),
             "",
             # De kosten horen hier, niet alleen in een database op een volume.
             # Wie moet beslissen of dit werk verder mag, hoort te zien wat het
@@ -354,7 +358,8 @@ class Runner:
             pending: list[Question] = []
             for _ in range(self.project.strength.max_implement_iterations):
                 # 1 · beantwoorden
-                answered, outcome = self._answer_phase(task_id, run_id, pending, baseline)
+                answered, outcome = self._answer_phase(task_id, run_id, pending,
+                                                       baseline, worktree)
                 if outcome is not None:
                     self.scope.end_run(run_id, outcome.status.value)
                     return outcome
@@ -497,7 +502,8 @@ class Runner:
 
     # -- fases -----------------------------------------------------------
     def _answer_phase(
-        self, task_id: int, run_id: int, pending: list[Question], baseline: VerificationResult
+        self, task_id: int, run_id: int, pending: list[Question],
+        baseline: VerificationResult, worktree=None
     ) -> tuple[list[Question], RunOutcome | None]:
         if not pending:
             return [], None
@@ -549,9 +555,15 @@ class Runner:
         if not uitgesteld:
             return answered, None
 
+        # Eerst het werk dat al af is bewaren, dan pas melden. Zo staat in de
+        # melding zelf wat er ondertussen al gedaan is, in plaats van dat de
+        # eigenaar moet aannemen dat er niets gebeurd is.
+        deelwerk = self._deelwerk_vastleggen(task_id, worktree, baseline)
+
         # Alles vastleggen; de zwaarste uitkomst bepaalt de taakstatus.
         for question, decision in uitgesteld:
-            self._park_or_block(task_id, question, decision.outcome, decision.reason)
+            self._park_or_block(task_id, question, decision.outcome, decision.reason,
+                                deelwerk=deelwerk)
         blokkerend = next(
             ((q, d) for q, d in uitgesteld if d.outcome is Triage.BLOCK), None
         )
@@ -562,6 +574,93 @@ class Runner:
         if len(uitgesteld) > 1:
             toelichting += f" (en {len(uitgesteld) - 1} andere vraag/vragen uit dezelfde ronde)"
         return answered, RunOutcome(status, toelichting)
+
+    def _deelwerk_vastleggen(self, task_id: int, worktree, baseline) -> str | None:
+        """Legt werk vast dat al af en groen is, ook als de taak blokkeert.
+
+        Zonder dit gaat een taak die op één beslissing wacht helemaal stil,
+        terwijl het eenduidige deel al gedaan kan zijn. Dat is verspilling: het
+        werk is al betaald, en bij een volgende poging zou ervoor opnieuw
+        betaald worden.
+
+        Drie voorwaarden, en geen ervan is optioneel. Ze bestaan omdat half werk
+        vastleggen erger is dan geen werk vastleggen:
+
+        1. Er moet werk zijn. Een lege diff levert niets op om te bewaren.
+        2. De verificatie mag geen nieuwe regressie tonen ten opzichte van de
+           baseline. Rood vastleggen zou een branch achterlaten waarvan niemand
+           weet of hij deugt -- precies de inconsistente tussenstaat die dit
+           niet mag opleveren.
+        3. Er komt geen pull request. De taak blijft geblokkeerd; dit is
+           bewaard werk, geen afgerond werk. Een PR zou zeggen "dit is klaar".
+
+        Wat er wél gebeurt is pushen: een branch op GitHub overleeft het
+        volume, en jij kunt hem lezen terwijl je nadenkt over het antwoord.
+        """
+        if worktree is None or not self.project.checks:
+            return None
+        try:
+            diff = worktree.uncommitted_diff()
+        except GitError:
+            return None
+        if not diff.strip():
+            return None
+
+        verification = self._verify(worktree, task_id=task_id)
+        regressies = verification.regressies(baseline)
+        if regressies:
+            self._log(
+                "deelwerk-niet-vastgelegd", task_id=task_id,
+                regressies=sorted(c.name for c in regressies),
+                detail="het gedeeltelijke werk brak checks die op de baseline groen"
+                       " stonden; niets vastgelegd, want een rode branch is erger"
+                       " dan geen branch",
+            )
+            return None
+
+        boodschap = (
+            f"Gedeeltelijk werk voor taak #{task_id}\n\n"
+            "Dit is het deel dat eenduidig uit de opdracht en de bevestigde kennis "
+            "volgt. De taak is NIET af: er staat nog minstens één beslissing open. "
+            "Er komt daarom geen pull request tot die beantwoord is.\n\n"
+            "De verificatie is gedraaid en toont geen nieuwe regressie ten opzichte "
+            "van de baseline."
+        )
+        try:
+            sha = self.git.commit(worktree, boodschap,
+                                  "orchestrator <bot@padelmq.be>",
+                                  base=self.project.default_branch)
+        except GitError as exc:
+            self._log("deelwerk-niet-vastgelegd", task_id=task_id,
+                      detail=f"vastleggen mislukte: {exc}")
+            return None
+
+        # Pushen is een aparte zorg. Het werk staat al veilig in een commit op de
+        # branch; lukt het pushen niet, dan is dat vervelend voor de zichtbaarheid
+        # maar het is geen reden om te doen alsof er niets gedaan is.
+        geduwd = True
+        try:
+            self.git.push(worktree)
+        except GitError as exc:
+            geduwd = False
+            self._log("deelwerk-niet-geduwd", task_id=task_id, commit=sha,
+                      detail=f"pushen mislukte: {exc}")
+
+        groen = sorted(c.name for c in verification.checks if c.ok)
+        rood = sorted(verification.rode_namen())
+        self._log("deelwerk-vastgelegd", task_id=task_id, branch=worktree.branch,
+                  commit=sha, groen=groen, rood=rood, geduwd=geduwd)
+        regels = [
+            f"Het eenduidige deel is al gedaan en vastgelegd op branch"
+            f" `{worktree.branch}`, commit `{sha[:8]}`"
+            + ("." if geduwd else " (nog niet gepusht; zie de audittrail)."),
+            f"Verificatie: {', '.join(groen) or 'geen checks'} groen"
+            + (f"; nog rood (stond al rood op de baseline): {', '.join(rood)}" if rood else "")
+            + ".",
+            "Er is bewust **geen** pull request geopend: de taak is niet af zolang"
+            " deze vraag openstaat.",
+        ]
+        return "\n".join(regels)
 
     def _guard_phase(
         self, task_id: int, execution: ExecutionResult, worktree, task, baseline
@@ -992,6 +1091,20 @@ class Runner:
             f"\n## Verificatie die hierna draait\n"
             + ("\n".join(f"- {k}: {v}" for k, v in self.project.checks.items())
                or "- geen geautomatiseerde checks; wees extra voorzichtig"),
+            # Zonder deze alinea kiest de uitvoerder tussen twee kwaden: raden,
+            # of niets doen. Beide zijn fout. Wat wel mag is het eenduidige deel
+            # afmaken en de rest als vraag teruggeven -- dan wacht alleen het
+            # deel dat werkelijk op een beslissing wacht.
+            "\n## Als een deel van de opdracht een beslissing vereist\n"
+            "Raad nooit. Maar stop ook niet met alles.\n\n"
+            "Voer uit wat eenduidig volgt uit de acceptatiecriteria en de bevestigde "
+            "projectkennis, en stel een vraag over precies dat deel waarvoor een "
+            "beslissing ontbreekt. Laat dat deel onaangeroerd: verander geen enkele "
+            "regel die van het antwoord afhangt.\n\n"
+            "Wat je aflevert moet op zichzelf kloppen. De verificatie draait over het "
+            "geheel, dus half werk dat een check breekt wordt niet bewaard. Kun je het "
+            "eenduidige deel niet losmaken zonder iets te raken waarover de vraag gaat, "
+            "doe dan niets en stel alleen de vraag.",
         ]
         if answered:
             parts.append("\n## Beantwoorde vragen\n" + "\n".join(
