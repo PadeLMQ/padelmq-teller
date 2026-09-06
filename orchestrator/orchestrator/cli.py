@@ -355,7 +355,7 @@ def cmd_serve(args) -> int:
     def herstel() -> int:
         totaal = 0
         for slug in slugs:
-            uitkomst = recover(db.scope(slug))
+            uitkomst = recover(db.scope(slug), settings)
             for regel in uitkomst.regels():
                 print(f"[{slug}] herstel: {regel}")
             totaal += len(uitkomst.hervatte_taken) + len(uitkomst.verweesde_runs)

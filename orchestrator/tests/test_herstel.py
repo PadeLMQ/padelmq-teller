@@ -111,3 +111,87 @@ class Herstellen(TempCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BudgetstopIsGeenCrash(TempCase):
+    """Een taak die op het budget strandt moet terugkomen als de grens omhoog gaat.
+
+    Wat er werkelijk gebeurde op 2026-09-06: taak 2 liep op $2,1448 tegen een
+    grens van $2,00. Het herstel bood haar drie keer opnieuw aan, ze viel drie
+    keer op dezelfde muur, er kwamen drie issues "Budget bereikt", en daarna gold
+    ze als definitief mislukt. Toen de eigenaar de grens verhoogde kon ze niet
+    meer terugkomen.
+    """
+
+    def _scope(self):
+        self.db.ensure_project("p")
+        return self.db.scope("p")
+
+    def _gestrand(self, scope, grens=2.0, dag="2026-09-06", niveau="taak 2"):
+        from orchestrator.models import TaskStatus
+
+        tid = scope.add_task("gestrande taak", acceptance=["werkt"])
+        scope.set_task(tid, status=TaskStatus.FAILED.value)
+        scope.log("budget", {"niveau": niveau, "grens": grens, "besteed": 2.1448,
+                             "dag": dag, "detail": "budget bereikt"}, task_id=tid)
+        return tid
+
+    def test_hogere_grens_laat_de_taak_terugkomen(self):
+        from orchestrator.models import TaskStatus
+        from orchestrator.recovery import recover
+
+        scope = self._scope()
+        tid = self._gestrand(scope, grens=2.0)
+        self.settings.budget_task_eur = 5.0
+
+        uitkomst = recover(scope, self.settings, vandaag="2026-09-06")
+        self.assertIn(tid, uitkomst.hervatte_taken)
+        self.assertEqual(scope.task(tid)["status"], TaskStatus.QUEUED.value)
+
+    def test_zonder_verandering_blijft_hij_staan(self):
+        """Anders probeert hij elke ronde opnieuw en meldt hij elke ronde opnieuw."""
+        from orchestrator.models import TaskStatus
+        from orchestrator.recovery import recover
+
+        scope = self._scope()
+        tid = self._gestrand(scope, grens=2.0)
+        self.settings.budget_task_eur = 2.0
+
+        for _ in range(5):
+            uitkomst = recover(scope, self.settings, vandaag="2026-09-06")
+            self.assertNotIn(tid, uitkomst.hervatte_taken)
+        self.assertEqual(scope.task(tid)["status"], TaskStatus.FAILED.value)
+
+    def test_een_nieuwe_dag_geeft_het_dagbudget_terug(self):
+        from orchestrator.recovery import recover
+
+        scope = self._scope()
+        tid = self._gestrand(scope, grens=15.0, niveau="project p vandaag")
+        self.settings.budget_project_daily_eur = 15.0
+
+        self.assertNotIn(tid, recover(scope, self.settings, vandaag="2026-09-06").hervatte_taken)
+        self.assertIn(tid, recover(scope, self.settings, vandaag="2026-09-07").hervatte_taken)
+
+    def test_een_budgetstop_verbruikt_geen_herstelpoging(self):
+        """Drie budgetstops maakten de taak definitief verloren. Dat mag niet."""
+        from orchestrator.recovery import recover
+
+        scope = self._scope()
+        tid = self._gestrand(scope, grens=2.0)
+        for _ in range(6):
+            recover(scope, self.settings, vandaag="2026-09-06")
+        soorten = [e["kind"] for e in scope.events(limit=100)]
+        self.assertNotIn("herstel-opgegeven", soorten)
+
+    def test_een_echte_crash_wordt_nog_steeds_beperkt_hersteld(self):
+        """De grens op herstelpogingen blijft gelden voor wat wél een crash is."""
+        from orchestrator.models import TaskStatus
+        from orchestrator.recovery import recover
+
+        scope = self._scope()
+        tid = scope.add_task("kapotte taak", acceptance=["werkt"])
+        for _ in range(6):
+            scope.set_task(tid, status=TaskStatus.IMPLEMENTING.value)
+            recover(scope, self.settings, vandaag="2026-09-06")
+        soorten = [e["kind"] for e in scope.events(limit=100)]
+        self.assertIn("herstel-opgegeven", soorten)

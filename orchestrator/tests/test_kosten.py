@@ -28,7 +28,7 @@ class Kosten(TempCase):
             self.guard.estimate_cost(Estimate("onbekend-model", 100, 100))
 
     def test_taakbudget_remt_voor_de_aanroep(self):
-        self.settings.budget_task_eur = 2.0
+        self.settings.budget_task_eur = 2.0  # expliciet, niet de standaard
         with self.assertRaises(BudgetExceeded) as ctx:
             self.guard.check(self.scope, self.estimate(1_000_000), task_id=1)
         self.assertIn("taak 1", str(ctx.exception))
@@ -91,3 +91,41 @@ class Kosten(TempCase):
         self.assertEqual(len(rapport), 2)
         self.assertEqual({r["project"] for r in rapport}, {"alpha", "beta"})
         self.assertEqual({r["role"] for r in rapport}, {"uitvoerder", "beoordelaar"})
+
+
+class Budgetgrenzen(TempCase):
+    """De remmen staan hoger, maar ze staan er nog.
+
+    Verhoogd op verzoek van de eigenaar op 2026-09-06, nadat een taak stukliep
+    op $2,1448 tegen een grens van $2,00. Deze test legt de afgesproken hoogtes
+    vast, en vooral de verhouding: de rongrens moet ONDER de taakgrens liggen,
+    anders is er geen rem per ronde meer, en de taakgrens moet onder het
+    dagbudget liggen, anders kan één taak de dag opmaken.
+    """
+
+    def test_afgesproken_hoogtes(self):
+        from orchestrator.config import Settings
+
+        s = Settings.from_env()
+        self.assertEqual(s.budget_task_eur, 5.0)
+        self.assertEqual(s.budget_project_daily_eur, 15.0)
+        self.assertEqual(s.budget_global_daily_eur, 15.0)
+
+    def test_de_remmen_staan_niet_uit(self):
+        from orchestrator.config import Settings
+
+        s = Settings.from_env()
+        for naam in ("budget_run_eur", "budget_task_eur",
+                     "budget_project_daily_eur", "budget_global_daily_eur"):
+            self.assertGreater(getattr(s, naam), 0, f"{naam} staat uit")
+
+    def test_de_verhouding_klopt(self):
+        from orchestrator.config import Settings
+
+        s = Settings.from_env()
+        self.assertLess(s.budget_run_eur, s.budget_task_eur,
+                        "zonder rongrens onder de taakgrens is er geen rem per ronde")
+        self.assertLessEqual(s.budget_task_eur, s.budget_project_daily_eur,
+                             "één taak mag het dagbudget van een project niet kunnen opmaken")
+        self.assertLessEqual(s.budget_project_daily_eur, s.budget_global_daily_eur,
+                             "een project mag niet meer mogen dan het geheel")

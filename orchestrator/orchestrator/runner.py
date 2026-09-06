@@ -490,11 +490,18 @@ class Runner:
         except BudgetExceeded as exc:
             self.scope.set_task(task_id, status=TaskStatus.FAILED.value)
             self.scope.end_run(run_id, "budget")
-            self._log("budget", task_id=task_id, detail=str(exc))
-            self.notifier.send(Message(
-                subject="Budget bereikt", body=str(exc),
-                project=self.project.slug, urgent=True,
-            ))
+            dag = _now()[:10]
+            # Grens en dag worden apart vastgelegd, niet alleen in de tekst: het
+            # herstel moet kunnen zien of er iets veranderd is voordat het de
+            # taak opnieuw aanbiedt. Zonder die gegevens is een budgetstop een
+            # doodlopende weg, ook nadat de grens omhoog gaat.
+            self._log("budget", task_id=task_id, detail=str(exc),
+                      niveau=exc.level, grens=exc.limit, besteed=exc.spent, dag=dag)
+            if self._budgetmelding_nieuw(task_id, exc, dag):
+                self.notifier.send(Message(
+                    subject="Budget bereikt", body=str(exc),
+                    project=self.project.slug, urgent=True,
+                ))
             return RunOutcome(TaskStatus.FAILED, str(exc))
         finally:
             if worktree is not None and self.project.checks is not None:
@@ -574,6 +581,28 @@ class Runner:
         if len(uitgesteld) > 1:
             toelichting += f" (en {len(uitgesteld) - 1} andere vraag/vragen uit dezelfde ronde)"
         return answered, RunOutcome(status, toelichting)
+
+    def _budgetmelding_nieuw(self, task_id: int, exc, dag: str) -> bool:
+        """Is deze budgetstop nieuw, of dezelfde muur als daarnet?
+
+        Zonder deze controle levert elke herstelpoging een nieuw issue op. Dat
+        gebeurde: drie meldingen "Budget bereikt" voor één taak, binnen tien
+        minuten, alle drie met dezelfde grens.
+        """
+        import json as _json
+
+        for rij in self.scope.events(limit=200):
+            if rij["task_id"] != task_id or rij["kind"] != "budget":
+                continue
+            try:
+                eerder = _json.loads(rij["payload"] or "{}")
+            except (TypeError, ValueError):
+                continue
+            if (str(eerder.get("dag") or "") == dag
+                    and str(eerder.get("niveau") or "") == exc.level
+                    and eerder.get("grens") == exc.limit):
+                return False
+        return True
 
     def _deelwerk_vastleggen(self, task_id: int, worktree, baseline) -> str | None:
         """Legt werk vast dat al af en groen is, ook als de taak blokkeert.

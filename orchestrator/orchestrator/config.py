@@ -54,10 +54,17 @@ class Settings:
     triage_model: str = "claude-haiku-4-5"
     reviewer_model: str = "gpt-5.6-terra"
 
-    budget_global_daily_eur: float = 5.0
-    budget_project_daily_eur: float = 5.0
-    budget_task_eur: float = 2.0
-    budget_run_eur: float = 1.0
+    # Verhoogd op verzoek van de eigenaar (2026-09-06): een documentatietaak
+    # liep stuk op $2,1448 tegen een grens van $2,00, en het echte werk aan de
+    # Product Engine is groter. De remmen blijven bestaan; ze staan hoger.
+    #
+    # De rongrens is meegegaan naar de helft van de taakgrens. Zonder dat zou
+    # de taakgrens onbruikbaar zijn: één implementatieronde kost gemeten al
+    # meer dan een dollar, en de rongrens knijpt eerder dan de taakgrens.
+    budget_global_daily_eur: float = 15.0
+    budget_project_daily_eur: float = 15.0
+    budget_task_eur: float = 5.0
+    budget_run_eur: float = 2.5
 
     # De munt waarin de tarieven zijn ingevuld. Alleen een etiket: er wordt
     # nergens omgerekend, dus dit moet kloppen met wat je in de tarieven zet.
@@ -82,10 +89,10 @@ class Settings:
             triage_model=os.environ.get("ORCH_TRIAGE_MODEL", "claude-haiku-4-5"),
             reviewer_model=os.environ.get("ORCH_REVIEWER_MODEL", "gpt-5.6-terra"),
             currency=os.environ.get("ORCH_CURRENCY", "USD").strip().upper() or "USD",
-            budget_global_daily_eur=_env_float("ORCH_BUDGET_GLOBAL_DAILY_EUR", 5.0),
-            budget_project_daily_eur=_env_float("ORCH_BUDGET_PROJECT_DAILY_EUR", 5.0),
-            budget_task_eur=_env_float("ORCH_BUDGET_TASK_EUR", 2.0),
-            budget_run_eur=_env_float("ORCH_BUDGET_RUN_EUR", 1.0),
+            budget_global_daily_eur=_env_float("ORCH_BUDGET_GLOBAL_DAILY_EUR", 15.0),
+            budget_project_daily_eur=_env_float("ORCH_BUDGET_PROJECT_DAILY_EUR", 15.0),
+            budget_task_eur=_env_float("ORCH_BUDGET_TASK_EUR", 5.0),
+            budget_run_eur=_env_float("ORCH_BUDGET_RUN_EUR", 2.5),
         )
         reviewer_in = os.environ.get("ORCH_REVIEWER_PRICE_IN")
         reviewer_out = os.environ.get("ORCH_REVIEWER_PRICE_OUT")

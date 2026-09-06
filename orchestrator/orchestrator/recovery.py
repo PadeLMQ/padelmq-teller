@@ -20,7 +20,7 @@ from __future__ import annotations
 import json
 from dataclasses import dataclass, field
 
-from .models import TaskStatus
+from .models import TaskStatus, now
 
 # Fasen waarin een taak alleen kan staan terwijl er iets draait. Staat ze daar
 # zonder lopende run, dan is dat proces weg.
@@ -76,7 +76,59 @@ def _herstelpogingen(scope, task_id: int) -> int:
     return int(rijen["n"])
 
 
-def recover(scope) -> Herstel:
+def _laatste_budgetstop(scope, task_id: int):
+    """De meest recente gebeurtenis van deze taak, als dat een budgetstop was.
+
+    Alleen de meest recente telt: is er daarna iets anders gebeurd, dan staat de
+    taak niet meer op het budget te wachten.
+    """
+    rij = scope.conn.execute(
+        "SELECT kind, payload FROM events WHERE project_id = ? AND task_id = ?"
+        " ORDER BY id DESC LIMIT 1",
+        (scope.project_id, task_id),
+    ).fetchone()
+    if rij is None or rij["kind"] != "budget":
+        return None
+    try:
+        return json.loads(rij["payload"] or "{}")
+    except (TypeError, ValueError):
+        return {}
+
+
+def budget_ruimer_dan(gegevens: dict, settings, vandaag: str) -> bool:
+    """Mag een taak die op het budget strandde het opnieuw proberen?
+
+    Alleen als er iets veranderd is: een hogere grens, of een nieuwe dag. Zonder
+    die voorwaarde probeert hij elke ronde opnieuw, valt elke ronde op dezelfde
+    grens om, en levert dat elke ronde een nieuwe melding op -- dat gebeurde
+    werkelijk, drie keer achter elkaar.
+    """
+    if not gegevens:
+        return False
+    if str(gegevens.get("dag") or "") != vandaag:
+        return True          # nieuwe dag: het dagbudget is weer vrij
+    oude_grens = gegevens.get("grens")
+    if oude_grens is None:
+        return False
+    niveau = str(gegevens.get("niveau") or "")
+    nu = _grens_voor(niveau, settings)
+    return nu is not None and nu > float(oude_grens)
+
+
+def _grens_voor(niveau: str, settings) -> float | None:
+    """Welke grens hoorde bij dit niveau? De naam komt uit BudgetExceeded."""
+    if niveau.startswith("run"):
+        return settings.budget_run_eur
+    if niveau.startswith("taak"):
+        return settings.budget_task_eur
+    if niveau.startswith("project"):
+        return settings.budget_project_daily_eur
+    if niveau.startswith("globaal"):
+        return settings.budget_global_daily_eur
+    return None
+
+
+def recover(scope, settings=None, vandaag: str | None = None) -> Herstel:
     """Ruimt op wat een vorige, afgebroken run heeft achtergelaten."""
     herstel = Herstel()
 
@@ -102,6 +154,22 @@ def recover(scope) -> Herstel:
             continue
 
         task_id = int(taak["id"])
+
+        # Een budgetstop is geen crash. Hij mag dus geen herstelpoging opsouperen,
+        # en de taak hoort terug te komen zodra de grens omhoog gaat of de dag
+        # omslaat -- niet pas als een mens hem met de hand terugzet.
+        budget = _laatste_budgetstop(scope, task_id)
+        if budget is not None:
+            if settings is not None and budget_ruimer_dan(
+                budget, settings, vandaag or now()[:10]
+            ):
+                scope.set_task(task_id, status=TaskStatus.QUEUED.value)
+                scope.log("budget-hervat",
+                          {"van": status, "oude_grens": budget.get("grens"),
+                           "niveau": budget.get("niveau")}, task_id=task_id)
+                herstel.hervatte_taken.append(task_id)
+            continue
+
         pogingen = _herstelpogingen(scope, task_id)
         if pogingen >= MAX_HERSTELPOGINGEN:
             if status != TaskStatus.FAILED.value:
