@@ -334,6 +334,7 @@ def cmd_startup(args) -> int:
 def cmd_serve(args) -> int:
     """Blijf draaien: herstellen, antwoorden ophalen, werk afwerken."""
     from .answers import process_answers, verval_gemarkeerde_vragen
+    from .hervatten import hervat_gemarkeerde_taken
     from .intake import intake
     from .notify.github import GitHubClient
     from .serve import Serve
@@ -388,6 +389,14 @@ def cmd_serve(args) -> int:
             for actie in process_answers(scope=db.scope(slug), project=project,
                                          client=GitHubClient()):
                 print(f"[{slug}] antwoord: {actie}")
+                totaal += 1
+            # Als laatste: een taak die niet op een vraag wacht maar op een
+            # duw. De rem op herhaalde opdrachten meldt zich zonder vraag, dus
+            # zonder deze stap is er geen enkele manier om zo'n taak weer te
+            # laten lopen.
+            for actie in hervat_gemarkeerde_taken(
+                    scope=db.scope(slug), project=project, client=GitHubClient()):
+                print(f"[{slug}] hervatting: {actie}")
                 totaal += 1
         return totaal
 

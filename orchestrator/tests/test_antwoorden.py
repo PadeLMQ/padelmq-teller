@@ -423,6 +423,20 @@ class VervallenVraag(TempCase):
         self.assertEqual(self.scope.question(self.qid)["status"], "vervallen")
         self.assertIn(24, self.Client([24]).gemarkeerd)
 
+    def test_de_rem_op_herhaalde_opdrachten_gaat_mee_weg(self):
+        """Anders is de hervatting zonder effect.
+
+        Dat gebeurde: taak 3 ging terug in de wachtrij en werd binnen veertig
+        seconden opnieuw geblokkeerd, omdat prompt en branch onveranderd waren
+        en de rem die toestand nog kende.
+        """
+        self.scope.remember_signature(self.task_id, "impl:onveranderd")
+        self.assertTrue(self.scope.signature_seen(self.task_id, "impl:onveranderd"))
+
+        self._verval(self.Client([24]))
+
+        self.assertFalse(self.scope.signature_seen(self.task_id, "impl:onveranderd"))
+
     def test_er_wordt_geen_beslissing_en_geen_kennisitem_vastgelegd(self):
         """Dit is de kern: nergens mag komen te staan dat de waarde klopt."""
         self._verval(self.Client([24]))

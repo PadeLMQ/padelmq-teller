@@ -69,7 +69,11 @@ def verval_gemarkeerde_vragen(*, scope, project, client) -> list[str]:
                    "reden": "met orch:vervallen gemarkeerd; niet beantwoordbaar",
                    "vraag": row["text"][:200]},
                   task_id=row["task_id"])
-        hervat = _requeue(scope, int(row["id"]))
+        # De rem op herhaalde betaalde opdrachten moet mee weg. Blijft hij
+        # staan, dan gaat de taak wel terug in de wachtrij maar blokkeert de
+        # rem hem meteen opnieuw: prompt en branch zijn immers onveranderd. Dat
+        # gebeurde bij vraag #7, binnen veertig seconden, twee keer.
+        hervat = _requeue(scope, int(row["id"]), vergeet_handtekeningen=True)
         client.comment(
             project.github_repo, int(nummer),
             "Deze vraag is vervallen verklaard. Er is **geen** antwoord vastgelegd,"
@@ -205,12 +209,15 @@ def _voer_stap_uit(*, scope, project, client, row, number: int, stap,
     return [f"vraag {row['id']}: blijft geblokkeerd ({stap.reason})"]
 
 
-def _requeue(scope: ProjectScope, question_id: int) -> int:
+def _requeue(scope: ProjectScope, question_id: int, *,
+             vergeet_handtekeningen: bool = False) -> int:
     tasks = scope.tasks_waiting_on(question_id)
     for task in tasks:
         if TaskStatus(task["status"]).waits_for_human:
             scope.set_task(task["id"], status=TaskStatus.QUEUED.value,
                            blocked_by_question=None)
+            if vergeet_handtekeningen:
+                scope.forget_signatures(int(task["id"]))
     return len(tasks)
 
 

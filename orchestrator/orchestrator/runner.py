@@ -374,11 +374,21 @@ class Runner:
                         " hetzelfde antwoord op; er is nieuwe informatie of een"
                         " gewijzigde toestand nodig."
                     )
+                    # Deze melding is geen vraag, dus er valt niets op te
+                    # antwoorden. Zonder de volgende zin staat de taak stil
+                    # zonder dat er een knop is om hem weer te laten lopen.
+                    melding = (
+                        detail
+                        + "\n\nWil je het toch nog eens proberen, zet dan het label"
+                        " `orch:hervat` op het opdrachtissue van deze taak. De rem"
+                        " wordt dan voor deze ene taak gewist en dezelfde opdracht"
+                        " mag opnieuw -- dat kost opnieuw geld."
+                    )
                     self.scope.set_task(task_id, status=TaskStatus.BLOCKED.value)
                     self._log("herhaalde-opdracht", task_id=task_id, detail=detail)
                     self.notifier.send(Message(
                         subject=f"Herhaalde opdracht tegengehouden: {task['title'][:50]}",
-                        body=detail, project=self.project.slug, urgent=True,
+                        body=melding, project=self.project.slug, urgent=True,
                         labels=["orch:block"],
                     ))
                     self.scope.end_run(run_id, "herhaalde_opdracht")

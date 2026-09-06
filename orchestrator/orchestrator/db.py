@@ -706,6 +706,49 @@ class ProjectScope:
             (self.project_id, task_id, signature),
         ))
 
+    def forget_signatures(self, task_id: int) -> int:
+        """Wist de rem op herhaalde betaalde opdrachten voor een taak.
+
+        De rem bewaart welke opdracht bij welke toestand al verstuurd is, zodat
+        dezelfde vraag niet twee keer betaald wordt. Maar hij mag een taak niet
+        voorgoed vastzetten. Dat gebeurde: vraag #7 van
+        padelmq-ai-product-engine werd vervallen verklaard en de taak ging terug
+        in de wachtrij, waarna de rem hem binnen veertig seconden opnieuw
+        blokkeerde -- prompt en branch waren immers onveranderd. De hervatting
+        was daarmee zonder effect.
+
+        Wissen mag alleen als er een uitdrukkelijke reden is om hetzelfde nog
+        eens te proberen: een vervallen vraag, of een hervatting die jij vraagt.
+        Nooit vanzelf, want dan is de rem weg.
+        """
+        cur = self.conn.execute(
+            "DELETE FROM signatures WHERE project_id = ? AND task_id = ?",
+            (self.project_id, task_id),
+        )
+        return int(cur.rowcount or 0)
+
+    def task_for_issue(self, issue_number: int) -> int | None:
+        """Welke taak hoort bij dit opdrachtissue?
+
+        De koppeling staat niet in de tabel `tasks` maar in het logboek: bij het
+        aannemen wordt vastgelegd welk issue welke taak werd. Dat is meteen de
+        audittrail, dus we lezen hem daar en houden geen tweede waarheid bij.
+        """
+        for rij in self._q(
+            "SELECT task_id, payload FROM events WHERE project_id = ?"
+            " AND kind = 'opdracht-aangenomen' ORDER BY id DESC",
+            (self.project_id,),
+        ):
+            if rij["task_id"] is None:
+                continue
+            try:
+                lading = json.loads(rij["payload"] or "{}")
+            except (ValueError, TypeError):
+                continue
+            if str(lading.get("issue")) == str(issue_number):
+                return int(rij["task_id"])
+        return None
+
     def remember_signature(self, task_id: int, signature: str) -> None:
         """Legt vast dat deze context werkelijk verstuurd is."""
         if not signature or self.signature_seen(task_id, signature):
