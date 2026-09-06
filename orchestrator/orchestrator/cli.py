@@ -426,10 +426,43 @@ def cmd_serve(args) -> int:
         print(hartslagregel(teller["rondes"], ronde, tijd=_now(),
                             interval=args.interval), flush=True)
         teller["fout"] = None
+        _bord_bijwerken()
 
     def gemeld(tekst: str) -> None:
         teller["fout"] = tekst
         print(f"! {tekst}")
+
+    # Het statusbord: één issue per repository, bijgewerkt in plaats van
+    # becommentarieerd. Zonder dit is een taak die stil in de wachtrij blijft
+    # staan van buitenaf niet te onderscheiden van een taak die draait -- en
+    # dan is de enige uitweg de logs van de hostingdienst openen.
+    bord = {"laatst": 0.0}
+
+    def _bord_bijwerken() -> None:
+        import time as _time
+
+        from .statusbord import bouw, publiceer
+
+        if _time.time() - bord["laatst"] < args.bord_interval:
+            return
+        bord["laatst"] = _time.time()
+        try:
+            rij = db.laatste_heartbeat()
+            hart = {"rondes": teller["rondes"], "laatste_ronde": _now()}
+            if rij is not None:
+                hart["rondes"] = rij["rondes"]
+                hart["laatste_ronde"] = rij["laatste_ronde"]
+            tekst = bouw(db, settings, slugs, hart)
+            repos = []
+            for slug in slugs:
+                repo = projects_mod.load(settings, slug).github_repo
+                if repo and repo not in repos:
+                    repos.append(repo)
+            for repo in repos:
+                publiceer(GitHubClient(), repo, tekst)
+        except Exception as exc:  # noqa: BLE001 - een bord mag de lus nooit slopen
+            print(f"! statusbord bijwerken mislukte: {type(exc).__name__}: {exc}",
+                  flush=True)
 
     lus = Serve(recover_fn=herstel, poll_fn=binnenkomend, work_fn=werk,
                 interval=args.interval, on_event=gemeld, na_ronde=klop)
@@ -1088,6 +1121,8 @@ def build_parser() -> argparse.ArgumentParser:
                        help="seconden wachten na een stille ronde")
     serve.add_argument("--rounds", type=int, default=None,
                        help="stop na dit aantal rondes (standaard: eeuwig)")
+    serve.add_argument("--bord-interval", type=int, default=300,
+                       help="seconden tussen twee bijwerkingen van het statusbord")
     serve.set_defaults(func=cmd_serve)
 
     sam = sub.add_parser("summary", help="leesbare samenvatting van een taak")

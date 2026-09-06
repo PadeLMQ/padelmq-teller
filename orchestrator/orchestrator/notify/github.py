@@ -89,6 +89,11 @@ class GitHubClient:
         )
         return int(result["number"])
 
+    def update_issue_body(self, repo: str, number: int, body: str) -> None:
+        """Vervangt de tekst van een issue. Voor het statusbord: bijwerken in
+        plaats van een reactie plaatsen, anders is het binnen een dag onleesbaar."""
+        self._request("PATCH", f"/repos/{repo}/issues/{number}", {"body": body})
+
     def comment(self, repo: str, number: int, body: str) -> int:
         """Plaatst een reactie en geeft het id ervan terug.
 
