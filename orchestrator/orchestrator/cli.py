@@ -787,7 +787,7 @@ def cmd_run(args) -> int:
     # blijft een taak die midden in een fase omviel voorgoed liggen, want de
     # wachtrij pakt alleen 'queued'.
     for slug in slugs:
-        herstel = recover(db.scope(slug))
+        herstel = recover(db.scope(slug), settings)
         for regel in herstel.regels():
             print(f"[{slug}] herstel: {regel}")
 

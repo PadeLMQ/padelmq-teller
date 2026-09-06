@@ -195,3 +195,29 @@ class BudgetstopIsGeenCrash(TempCase):
             recover(scope, self.settings, vandaag="2026-09-06")
         soorten = [e["kind"] for e in scope.events(limit=100)]
         self.assertIn("herstel-opgegeven", soorten)
+
+
+class ElkeAanroepGeeftDeInstellingenMee(TempCase):
+    """Zonder instellingen kan het herstel een budgetstop niet beoordelen.
+
+    De budgetgrens staat in de instellingen. Wordt die niet meegegeven, dan
+    blijft een op budget gestrande taak liggen zonder dat iemand ziet waarom --
+    de functie doet dan gewoon niets, stilletjes.
+    """
+
+    def test_geen_enkele_aanroep_vergeet_de_instellingen(self):
+        import inspect
+        import re
+
+        from orchestrator import cli
+
+        # Op regelniveau, niet met een haakjes-regex: db.scope(slug) heeft zelf
+        # haakjes, en een regex die daarop struikelt toetst iets anders dan hij
+        # beweert.
+        regels = [r.strip() for r in inspect.getsource(cli).splitlines()
+                  if re.search(r"\brecover\(", r) and "def recover" not in r]
+        self.assertTrue(regels, "geen enkele aanroep van recover() gevonden")
+        for regel in regels:
+            with self.subTest(aanroep=regel):
+                self.assertIn("settings", regel,
+                              "recover() zonder instellingen kan geen budgetstop hervatten")
