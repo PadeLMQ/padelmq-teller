@@ -64,6 +64,12 @@ class Herstellen(TempCase):
         for status in (TaskStatus.BLOCKED.value, TaskStatus.PARKED.value):
             with self.subTest(status=status):
                 task_id = self._taak(status)
+                # Wachten op een mens betekent: er ligt een vraag. Zonder vraag
+                # wacht de taak nergens op en is ze zoek -- dat is een aparte
+                # zaak, met een eigen test in GeblokkeerdDoorNiets.
+                qid = self.scope.add_question("Welke kleur?", "block",
+                                              f"vv-{task_id}", task_id=task_id)
+                self.scope.set_task(task_id, status=status, blocked_by_question=qid)
                 recover(self.scope)
                 self.assertEqual(
                     self.scope.task(task_id)["status"], status,
@@ -221,3 +227,54 @@ class ElkeAanroepGeeftDeInstellingenMee(TempCase):
             with self.subTest(aanroep=regel):
                 self.assertIn("settings", regel,
                               "recover() zonder instellingen kan geen budgetstop hervatten")
+
+
+class GeblokkeerdDoorNiets(TempCase):
+    """Geblokkeerd zonder vraag is geen blokkade maar een verdwijning.
+
+    Taak #1 van padelmq-ai-product-engine raakte zo kwijt: de herhalingspoort
+    zette hem op BLOCKED met een kale melding, zonder vraag. Er viel niets te
+    beantwoorden, dus was er geen route terug -- ook niet voor de eigenaar.
+    """
+
+    def _scope(self):
+        self.db.ensure_project("p")
+        return self.db.scope("p")
+
+    def test_wordt_eenmalig_teruggezet(self):
+        from orchestrator.models import TaskStatus
+        from orchestrator.recovery import recover
+
+        scope = self._scope()
+        tid = scope.add_task("zoekgeraakt", acceptance=["werkt"])
+        scope.set_task(tid, status=TaskStatus.BLOCKED.value)
+
+        uitkomst = recover(scope, self.settings)
+        self.assertIn(tid, uitkomst.hervatte_taken)
+        self.assertEqual(scope.task(tid)["status"], TaskStatus.QUEUED.value)
+
+    def test_niet_twee_keer(self):
+        """Eén keer is herstel, twee keer is rondjes draaien."""
+        from orchestrator.models import TaskStatus
+        from orchestrator.recovery import recover
+
+        scope = self._scope()
+        tid = scope.add_task("zoekgeraakt", acceptance=["werkt"])
+        scope.set_task(tid, status=TaskStatus.BLOCKED.value)
+        recover(scope, self.settings)
+
+        scope.set_task(tid, status=TaskStatus.BLOCKED.value)
+        self.assertNotIn(tid, recover(scope, self.settings).hervatte_taken)
+
+    def test_een_echte_blokkade_blijft_liggen(self):
+        """Met een vraag erbij wacht hij terecht op een antwoord."""
+        from orchestrator.models import TaskStatus
+        from orchestrator.recovery import recover
+
+        scope = self._scope()
+        tid = scope.add_task("wacht op beslissing", acceptance=["werkt"])
+        qid = scope.add_question("Welke kleur?", "block", "vv", task_id=tid)
+        scope.set_task(tid, status=TaskStatus.BLOCKED.value, blocked_by_question=qid)
+
+        self.assertNotIn(tid, recover(scope, self.settings).hervatte_taken)
+        self.assertEqual(scope.task(tid)["status"], TaskStatus.BLOCKED.value)

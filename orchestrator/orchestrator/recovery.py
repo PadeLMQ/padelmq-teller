@@ -76,6 +76,22 @@ def _herstelpogingen(scope, task_id: int) -> int:
     return int(rijen["n"])
 
 
+def _kolom(rij, naam):
+    try:
+        return rij[naam]
+    except (IndexError, KeyError):
+        return None
+
+
+def _al_gedaan(scope, task_id: int, soort: str) -> bool:
+    """Is deze ingreep al eens gedaan? Eén keer is herstel, twee keer is rondjes."""
+    rij = scope.conn.execute(
+        "SELECT COUNT(*) AS n FROM events WHERE project_id = ? AND task_id = ? AND kind = ?",
+        (scope.project_id, task_id, soort),
+    ).fetchone()
+    return int(rij["n"]) > 0
+
+
 def _laatste_budgetstop(scope, task_id: int):
     """De meest recente gebeurtenis van deze taak, als dat een budgetstop was.
 
@@ -148,6 +164,22 @@ def recover(scope, settings=None, vandaag: str | None = None) -> Herstel:
     # 2 · taken die in een tussenfase bleven staan
     for taak in scope.tasks():
         status = taak["status"]
+
+        # Geblokkeerd door niets is niet geblokkeerd, maar zoek. Er is dan geen
+        # vraag om te beantwoorden en dus geen enkele route terug -- de taak
+        # blijft voorgoed liggen zonder dat iemand er iets aan kan doen. Eén
+        # keer terugzetten is veilig: raakt hij opnieuw geblokkeerd, dan hoort
+        # daar nu wél een vraag bij en blijft hij liggen zoals bedoeld.
+        if status == TaskStatus.BLOCKED.value and not _kolom(taak, "blocked_by_question"):
+            if _al_gedaan(scope, task_id := int(taak["id"]), "blokkade-zonder-vraag"):
+                continue
+            scope.set_task(task_id, status=TaskStatus.QUEUED.value)
+            scope.log("blokkade-zonder-vraag",
+                      {"detail": "geblokkeerd zonder vraag; er was geen weg terug"},
+                      task_id=task_id)
+            herstel.hervatte_taken.append(task_id)
+            continue
+
         if status in MET_RUST_LATEN or status == TaskStatus.QUEUED.value:
             continue
         if status not in ONDERBROKEN and status != TaskStatus.FAILED.value:
