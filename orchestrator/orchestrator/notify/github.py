@@ -97,6 +97,16 @@ class GitHubClient:
     def add_labels(self, repo: str, number: int, labels: list[str]) -> None:
         self._request("POST", f"/repos/{repo}/issues/{number}/labels", {"labels": labels})
 
+    def remove_label(self, repo: str, number: int, label: str) -> None:
+        """Haalt één label weg. Een label dat er niet staat is geen fout."""
+        from urllib.parse import quote
+
+        try:
+            self._request("DELETE", f"/repos/{repo}/issues/{number}/labels/{quote(label)}")
+        except GitHubError as exc:
+            if "gaf 404" not in str(exc):
+                raise
+
     def issue_author_is_owner(self, repo: str, issue: dict) -> bool:
         """Alleen de eigenaar mag werk opdragen.
 

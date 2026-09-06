@@ -4,6 +4,7 @@ import unittest
 
 from orchestrator.intake import (
     AANGENOMENLABEL,
+    CRITERIALABEL,
     TAAKLABEL,
     acceptatiecriteria,
     intake,
@@ -21,6 +22,7 @@ class FakeGitHub:
         self.issues = issues or []
         self.posted = []
         self.labels = []
+        self.verwijderd = []
 
     def issues_with_label(self, repo, label):
         return [i for i in self.issues
@@ -31,6 +33,12 @@ class FakeGitHub:
         for i in self.issues:
             if i["number"] == number:
                 i.setdefault("labels", []).extend({"name": l} for l in labels)
+
+    def remove_label(self, repo, number, label):
+        self.verwijderd.append((number, label))
+        for i in self.issues:
+            if i["number"] == number:
+                i["labels"] = [l for l in i.get("labels", []) if l["name"] != label]
 
     def comment(self, repo, number, body):
         self.posted.append((number, body))
@@ -91,7 +99,12 @@ class Aannemen(TempCase):
 
         self.assertEqual(self.scope.tasks(), [])
         self.assertIn("geen acceptatiecriteria", client.posted[0][1])
-        self.assertEqual(client.labels, [], "een geweigerd issue is toch gemarkeerd")
+        # Het krijgt wel een merkteken 'geen criteria', anders zou dezelfde
+        # melding elke ronde terugkomen. Maar aangenomen is het niet.
+        gezet = {l for _, labels in client.labels for l in labels}
+        self.assertNotIn(AANGENOMENLABEL, gezet,
+                         "een geweigerd issue is toch als aangenomen gemarkeerd")
+        self.assertEqual(gezet, {CRITERIALABEL})
 
     def test_alleen_de_eigenaar_mag_werk_opdragen(self):
         issue = _issue(auteur="iemandanders")
@@ -124,3 +137,53 @@ class Aannemen(TempCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class GeenCriteriaBlijftNietDoorzeuren(TempCase):
+    """Een lus die 24/7 draait maakt van een kleine onvolkomenheid vanzelf een
+    grote: zonder merkteken kwam hetzelfde commentaar elke ronde terug."""
+
+    def _scope(self):
+        self.db.ensure_project("p")
+        return self.db.scope("p")
+
+    def _project(self):
+        import types
+        return types.SimpleNamespace(slug="p", github_repo="eigenaar/repo")
+
+    def test_er_wordt_maar_een_keer_gemeld(self):
+        issue = _issue(body="Geen enkel criterium hier.")
+        client = FakeGitHub([issue])
+        scope, project = self._scope(), self._project()
+
+        intake(scope=scope, project=project, client=client)
+        self.assertEqual(len(client.posted), 1)
+        self.assertIn(CRITERIALABEL, {l["name"] for l in issue["labels"]})
+
+        for _ in range(5):
+            acties = intake(scope=scope, project=project, client=client)
+            self.assertEqual(acties, [], "een al gemelde opdracht hoort stil te blijven")
+        self.assertEqual(len(client.posted), 1,
+                         "vijf extra rondes hebben opnieuw commentaar geplaatst")
+
+    def test_criteria_erbij_zetten_haalt_het_merkteken_weg_en_neemt_aan(self):
+        """Het issue moet zichzelf kunnen herstellen zonder tussenkomst."""
+        issue = _issue(body="Nog niets.")
+        client = FakeGitHub([issue])
+        scope, project = self._scope(), self._project()
+        intake(scope=scope, project=project, client=client)
+
+        issue["body"] = "Nu wel.\n\n- [ ] npm run test geeft exit 0\n"
+        acties = intake(scope=scope, project=project, client=client)
+
+        self.assertTrue(any("aangenomen" in a for a in acties), acties)
+        self.assertIn((1, CRITERIALABEL), client.verwijderd)
+        self.assertIn(AANGENOMENLABEL, {l["name"] for l in issue["labels"]})
+        self.assertNotIn(CRITERIALABEL, {l["name"] for l in issue["labels"]})
+
+    def test_geweigerde_opdracht_maakt_geen_taak_aan(self):
+        """Belangrijk voor de kosten: weigeren mag nooit werk starten."""
+        client = FakeGitHub([_issue(body="niets")])
+        scope = self._scope()
+        intake(scope=scope, project=self._project(), client=client)
+        self.assertEqual(scope.tasks(), [])
