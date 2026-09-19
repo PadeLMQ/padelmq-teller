@@ -1,4 +1,13 @@
 <!DOCTYPE html>
+<script type="application/json" id="cowork-artifact-meta">
+{
+  "name": "Padelmq Road To 1m",
+  "schemaVersion": 1,
+  "description": "PadeLMQ × Tienda Padel Point — live tracker richting €1.000.000 omzet in 2026. Aftelklok tot 31 dec + voortgangsbalk. Omzet per kanaal (webshop/fysiek/B2B/Bancontact) in de CONFIG; geplande taken werken die bij.",
+  "mcpTools": [],
+  "mcpServerNames": []
+}
+</script>
 <html lang="en">
 <head>
 <meta charset="UTF-8">
@@ -295,17 +304,30 @@
      Revenue per channel; total = sum of the four. */
   const CONFIG = {
     COMPONENTS: {
-      webshop:    591222,   // PadeLMQ Shopify webshop   (refreshed hourly)
+      webshop:    585227,   // PadeLMQ Shopify webshop   (refreshed hourly)
       fysiek:     18712,    // Physical store Shopify
       b2b:        61809,    // B2B Lucy (≥€500, CN-pairs removed, −€1500) + Onfact
       bancontact: 1280      // Bancontact Pro (racket-test €10 payments)
     },
     GOAL:    1000000,
     LASTYEAR: 579030,       // PadeLMQ total sales 2025 (beat-it line)
-    PADELMQ_ORDERS: 3585,   // PadeLMQ orders 2026 (webshop 2944 + fysiek 98)
+    PADELMQ_ORDERS: 3007,   // PadeLMQ orders 2026 (webshop 2944 + fysiek 98)
     TIENDA: { total: 1021511, anchorISO: "2026-08-18T12:00:00", perDay: 730, jan1: 854472, targetRevenue: 50000000 }, // running order counter ~730/day; jan1 = order# ~1 Jan 2026; est. revenue = 2026 orders x PadeLMQ AOV
-    UPDATED: "September 19, 2026, 22:28"
+    UPDATED: "September 19, 2026, 23:45"
   };
+
+  // --- SAFETY: coerce every revenue component to a plain number, whatever shape it has.
+  // Guards against a component being written as {value:...}, a numeric string, or null,
+  // which would otherwise make the total render as 0 / NaN.
+  (function(){
+    const num = v => {
+      if (typeof v === "number") return isFinite(v) ? v : 0;
+      if (v && typeof v === "object") return Number(v.value ?? v.amount ?? 0) || 0;
+      const n = Number(v); return isNaN(n) ? 0 : n;
+    };
+    if (CONFIG && CONFIG.COMPONENTS) for (const k in CONFIG.COMPONENTS) CONFIG.COMPONENTS[k] = num(CONFIG.COMPONENTS[k]);
+    if (CONFIG && CONFIG.PADELMQ_ORDERS != null) CONFIG.PADELMQ_ORDERS = num(CONFIG.PADELMQ_ORDERS);
+  })();
 
   const nf = new Intl.NumberFormat("en-US");
   const euro = n => "€" + nf.format(Math.round(n));
