@@ -313,7 +313,7 @@
     LASTYEAR: 579030,       // PadeLMQ total sales 2025 (beat-it line)
     PADELMQ_ORDERS: 3587,   // PadeLMQ orders 2026 (webshop 2944 + fysiek 98)
     TIENDA: { total: 1021511, anchorISO: "2026-08-18T12:00:00", perDay: 730, jan1: 854472, targetRevenue: 50000000 }, // running order counter ~730/day; jan1 = order# ~1 Jan 2026; est. revenue = 2026 orders x PadeLMQ AOV
-    UPDATED: "September 19, 2026, 23:55"
+    UPDATED: "September 19, 2026, 23:58"
   };
 
   // --- SAFETY: coerce every revenue component to a plain number, whatever shape it has.
@@ -359,6 +359,12 @@
   (function(){const host=document.getElementById("flags"); const p=CONFIG.LASTYEAR/CONFIG.GOAL*100; const d=document.createElement("div"); d.className="flag"; d.dataset.p=p; d.style.left=p+"%"; d.innerHTML="<i></i>PadeLMQ '25"; host.appendChild(d);})();
 
   function animateNumber(el, to, fmt, dur){
+    // Guarantee the final value even if requestAnimationFrame is paused
+    // (background tab, reduced-motion, throttled browser) so the figure can
+    // never stay stuck on its €0 start value.
+    el.textContent = fmt(to);
+    const reduce = window.matchMedia && matchMedia('(prefers-reduced-motion: reduce)').matches;
+    if (reduce || document.hidden) return;
     const start=performance.now();
     function frame(t){
       let k=Math.min(1,(t-start)/dur); k=1-Math.pow(1-k,3);
@@ -366,6 +372,8 @@
       if(k<1) requestAnimationFrame(frame); else el.textContent=fmt(to);
     }
     requestAnimationFrame(frame);
+    // hard fallback: force the final value shortly after the animation window
+    setTimeout(function(){ el.textContent = fmt(to); }, dur + 400);
   }
 
   function daysElapsedThisYear(){ const now=new Date(); const jan1=new Date(now.getFullYear(),0,1); return Math.max(1,Math.floor((now-jan1)/86400000)+1); }
